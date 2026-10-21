@@ -531,3 +531,6 @@ pilot's t1 curve is biased when α0 = 25.
 **Regression bases.** Chebyshev polynomials for the LSM regressions; scaled
 monomials centred at S0 for the t = 0 regression, so the coefficients are the
 price and its derivatives.
+
+
+**Branch save-states.** We will have a save states prior to meetings, these should not be touched, the workflow is working always on the main branch and make a save state every now and then to save progress before a meeting.
