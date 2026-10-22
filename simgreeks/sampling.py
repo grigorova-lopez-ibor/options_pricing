@@ -3,7 +3,7 @@ the paper.
 
 Volatility. The network is meant to be accurate for sigma in [5 %, 50 %]. A
 network is least accurate at the edges of its training data, so sigma is
-drawn from a plateau on [5 %, 50 %] with tails that fall to 0 at 1 % and 54 %:
+drawn from a plateau on [5 %, 50 %] with tails that fall to 0 at 1 % and 60 %:
 the network sees labels on both sides of 5 % and 50 %. The density is
 flat on the plateau and g((x - lo) / (a - lo)) times the plateau level in the
 lower tail (and the mirror image in the upper tail), with g(0) = 0, g(1) = 1:
@@ -15,8 +15,8 @@ lower tail (and the mirror image in the upper tail), with g(0) = 0, g(1) = 1:
 
 What protects the edges is the density just outside 5 % and 50 %, so
 "concave" and "cosine" do it best; "convex" least. Share of the labels in
-the tails with the default bounds: concave 12.3 %, cosine and linear 8.2 %,
-convex 5.6 %.
+the tails with the default bounds (lower 1-5 %, upper 50-60 %): concave 19.6 %,
+cosine and linear 13.5 % (3.8 % below 5 %, 9.6 % above 50 %), convex 9.4 %.
 
 Draws go through the inverse CDF, so uniform (e.g. Sobol) points keep their
 low discrepancy.
@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import numpy as np
 
-SIGMA_BOUNDS = (0.01, 0.05, 0.50, 0.54)   # (lo, a, b, hi): tails on [lo, a] and [b, hi]
+SIGMA_BOUNDS = (0.01, 0.05, 0.50, 0.60)   # (lo, a, b, hi): tails on [lo, a] and [b, hi]
 TAILS = {
     "cosine": lambda t: 0.5 * (1.0 - np.cos(np.pi * t)),
     "concave": lambda t: np.sqrt(np.clip(1.0 - (1.0 - t) ** 2, 0.0, None)),

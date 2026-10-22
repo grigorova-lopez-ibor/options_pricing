@@ -545,13 +545,13 @@ def test_sigma_plateau_sampler():
     u = (np.arange(100_000) + 0.5) / 100_000
     for tail in TAILS:
         x = plateau_ppf(u, tail=tail)
-        assert 0.01 <= x.min() and x.max() <= 0.54 and np.all(np.diff(x) >= 0)
+        assert 0.01 <= x.min() and x.max() <= 0.60 and np.all(np.diff(x) >= 0)
         assert abs(np.mean((x < 0.05) | (x > 0.50)) - tail_share(tail=tail)) < 1e-3
         mid = x[(x >= 0.05) & (x <= 0.50)]          # uniform on the plateau
         assert abs(np.mean(mid < 0.275) - 0.5) < 1e-3
-        g = np.linspace(0.01, 0.54, 100_001)
+        g = np.linspace(0.01, 0.60, 100_001)
         assert abs(np.trapezoid(plateau_pdf(g, tail=tail), g) - 1) < 1e-6
-    assert abs(tail_share(tail="linear") - 4 / 49) < 1e-6   # tails 4 + 4 points at half density
+    assert abs(tail_share(tail="linear") - 7 / 52) < 1e-6   # tails 4 + 10 points at half density
 
 
 def test_multi_run_paths():

@@ -5,16 +5,16 @@ Options are drawn on scrambled Sobol points (seeded) over moneyness,
 volatility, rate, dividend yield and maturity at a fixed S0, then rounded:
 
     S0/K   uniform on [0.8, 1.2]; K = S0 / (S0/K) rounded to 0.01
-    sigma  plateau on [5 %, 50 %] with tails to 1 % and 54 %
+    sigma  plateau on [5 %, 50 %] with tails to 1 % and 60 %
            (simgreeks.sampling.plateau_ppf; --sigma-tail sets their shape), step 0.01 %
     r, d   uniform on [0, 5 %], step 0.25 % (so the shrinking windows min(0.03, r0)
            are >= 0.25 %; r0 = 0 is exact)
-    T      uniform on [1 month, 2 years], step 0.001
+    T      uniform on [2 months, 2 years], step 0.001
 
 Each label is one call of simgreeks.multi.label with the default MultiConfig
 (the sigma run gets 2x the main paths, the r and d runs half; see
 multi.RUN_PATHS); labels scale exactly with (S0, K), so S0 only sets the units.
-At T = 1 month a label has round(50 / 12) = 4 exercise dates.
+At T = 2 months a label has round(50 / 6) = 8 exercise dates.
 
     python experiments/generate_labels.py [--n 100] [--S0 100] [--workers N]
                                           [--seed 1] [--sigma-tail cosine]
@@ -83,7 +83,7 @@ EXTRA = ["ex_region", "alpha_S", "alpha_sigma"]
 # (low, high, rounding step) of each input drawn uniformly; "moneyness" is S0/K.
 # sigma: SIGMA_BOUNDS (plateau and tails), rounded to SIGMA_STEP
 RANGES = {"moneyness": (0.8, 1.2, None), "r": (0.0, 0.05, 0.0025),
-          "d": (0.0, 0.05, 0.0025), "T": (1 / 12, 2.0, 0.001)}
+          "d": (0.0, 0.05, 0.0025), "T": (1 / 6, 2.0, 0.001)}
 SIGMA_STEP = 0.0001
 
 
@@ -141,7 +141,7 @@ def main():
     ap.add_argument("--S0", type=float, default=100.0)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--sigma-tail", choices=sorted(TAILS), default="cosine",
-                    help="shape of the sigma tails (1-5 %% and 50-54 %%; simgreeks.sampling)")
+                    help="shape of the sigma tails (1-5 %% and 50-60 %%; simgreeks.sampling)")
     ap.add_argument("--workers", type=int, default=None)
     ap.add_argument("--exact", action="store_true",
                     help="add the reference PDE values (for checking the labels)")

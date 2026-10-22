@@ -38,8 +38,8 @@ settings as Table 5's σ = 20 %, T = 1 rows.
 | `experiments/theta_check.py` | Simulated Θ vs the reference pricer's finite-difference Θ |
 | `simgreeks/multi.py` | Label generator: price and Δ, Γ, Θ, Vega, Volga, Vanna, Rho, Phi (∂P/∂d, dividend Rho) and cross Greeks by multivariate ISD; label designs D1–D4 (not part of the paper) |
 | `experiments/multi_check.py` | Labels vs closed form (European) and the reference pricer (American); resumable |
-| `simgreeks/sampling.py` | σ distribution of the training set: plateau on 5–50 % with tails to 1 % and 54 % (not part of the paper) |
-| `experiments/generate_labels.py` | A labelled data set: options drawn over S0/K 0.8–1.2, σ (plateau 5–50 %, tails 1–54 %), r and d 0–5 %, T 1 month–2 years; progress every 1 %; resumable; `--exact` adds the reference values |
+| `simgreeks/sampling.py` | σ distribution of the training set: plateau on 5–50 % with tails to 1 % and 60 % (not part of the paper) |
+| `experiments/generate_labels.py` | A labelled data set: options drawn over S0/K 0.8–1.2, σ (plateau 5–50 %, tails 1–60 %), r and d 0–5 %, T 2 months–2 years; progress every 1 %; resumable; `--exact` adds the reference values |
 | `experiments/analyze_labels.py` | Sanity checks of a label CSV and, with reference values, the bias and noise of each Greek and where the bias is |
 | `experiments/tournament.py` | Label-design tournament: 4 designs × in/out-of-sample exercise rule; European validation, 33-option American check, 2,500-option comparison; resumable Parquet jobs |
 | `scc/` | BU SCC job arrays for the tournament: environment setup, SGE script, submit wrapper, runbook (`scc/README.md`) |
