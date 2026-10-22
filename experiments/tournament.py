@@ -185,14 +185,16 @@ def spec_of(row) -> PutSpec:
 
 
 def config_of(variant: str) -> MultiConfig:
+    # run_paths=(): these variants were run with 100,000 + 100,000 paths in every
+    # run, before the default gave the sigma run more; kept so resumed jobs match
     if variant == PROD_VARIANT:
-        return MultiConfig(label_source="oos")
+        return MultiConfig(label_source="oos", run_paths=())
     if variant == "D2-avg":
-        return MultiConfig(insample_too=True, label_source="oos")
+        return MultiConfig(insample_too=True, label_source="oos", run_paths=())
     if variant == STAGE2_VARIANT or variant == "D2-daily":
-        return MultiConfig()
+        return MultiConfig(run_paths=())
     if variant == "D2-daily-vf50":
-        return MultiConfig(vf_time=0.02)
+        return MultiConfig(vf_time=0.02, run_paths=())
     if variant == "D3o3-oos":
         # the tournament's alpha_d rule (min(0.03, r0)), so only the t = 0 order differs from D3-oos
         return design_config("D3", "pilot", t0_max_order=ORDER3, alpha_d_shrink="r0")

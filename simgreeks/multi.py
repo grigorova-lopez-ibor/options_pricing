@@ -74,7 +74,8 @@ widths="fixed" skips the selection and uses the placeholder widths
 alpha_S = c_S S0 sigma sqrt(T), alpha_sigma = c_sigma sigma, alpha_r, alpha_d.
 
 Price, Delta and Gamma come from the run in S alone when the design has one
-(DESIGNS D1, D3), else they are averaged over the runs; each parameter Greek
+(DESIGNS D1, D3), else they are averaged over the runs, weighted by each run's
+main paths (MultiConfig.run_paths gives the sigma run more); each parameter Greek
 comes from the run(s) that disperse its parameters; Theta follows from the PDE identity
 (core.theta_pde). With american_t0=True (default), an option whose continuation
 value is at or below its exercise value at S0 is exercised at t_0: price K - S0
@@ -90,7 +91,7 @@ from __future__ import annotations
 import ast
 import itertools
 import warnings
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from math import factorial
 
 import numpy as np
@@ -113,6 +114,13 @@ WIDTHS = ("selector", "fixed")
 NU = {"S": 2, "sigma": 2}          # derivative each selected width is optimised for
 #                                    (r, d: MultiConfig.nu_rd)
 GROUPS = (("S", "sigma"), ("S", "r"), ("S", "d"))
+# Paths of each run as multiples of (N, N_pilot): (group, main factor, pilot factor).
+# Sigma is the key input, so its run gets 2x the main paths and r and d half of
+# both (default N = 100,000: (S, sigma) 200,000 main + 100,000 pilot, (S, r) and
+# (S, d) 50,000 + 50,000 each; 500,000 paths per label instead of 600,000). The
+# noise of a Greek scales as 1/sqrt(paths): Vega, Volga, Vanna x 0.71, Rho, Phi
+# x 1.41 against equal runs. Groups not listed use (N, N_pilot).
+RUN_PATHS = ((("S", "sigma"), 2.0, 1.0), (("S", "r"), 0.5, 0.5), (("S", "d"), 0.5, 0.5))
 # Vera (d2P / dsigma dr) needs sigma and r in one run: add the group
 # ("S", "sigma", "r"), which takes about 40 % of the time of a 4-run label.
 
@@ -159,8 +167,9 @@ OUTPUTS = tuple(GREEKS) + ("theta",)
 
 @dataclass(frozen=True)
 class MultiConfig:
-    N: int = 100_000               # main paths per run (one run per group)
+    N: int = 100_000               # main paths per run (one run per group), times run_paths' factor
     groups: tuple = GROUPS         # dispersed coordinates of each run; each contains "S"
+    run_paths: tuple = RUN_PATHS   # (group, main factor, pilot factor); () for N and N_pilot in every run
     # widths of the dispersion
     widths: str = "selector"       # "selector" (pilot chooses `select`) or "fixed"
     select: tuple = ("S", "sigma")  # coordinates whose width the selector chooses
@@ -220,6 +229,10 @@ class MultiConfig:
             raise ValueError(f"unknown alpha_d_shrink {self.alpha_d_shrink!r}")
         if self.rd_unit not in ("pilot", "raw"):
             raise ValueError(f"unknown rd_unit {self.rd_unit!r}")
+        for entry in self.run_paths:
+            if len(entry) != 3 or not entry[1] > 0 or not entry[2] > 0:
+                raise ValueError("run_paths entries must be (group, main factor > 0, "
+                                 f"pilot factor > 0), got {entry!r}")
         if self.pilot_widen < 1:
             raise ValueError("pilot_widen must be >= 1")
         if not 0 < self.c0_sigma < 1 or not 0 < self.c_sigma * self.pilot_widen < 1:
@@ -729,9 +742,20 @@ def pilot(spec: PutSpec, cfg: MultiConfig, dims, rng: np.random.Generator):
     return alphas, alphas, None
 
 
+def run_config(cfg: MultiConfig, dims) -> MultiConfig:
+    """cfg with N and N_pilot set to the paths of the run ``dims`` (cfg.run_paths)."""
+    for group, main, pilot_factor in cfg.run_paths:
+        if tuple(group) == tuple(dims):
+            return replace(cfg, N=int(round(main * cfg.N)),
+                           N_pilot=int(round(pilot_factor * (cfg.N_pilot or cfg.N))))
+    return cfg
+
+
 def run_group(spec: PutSpec, cfg: MultiConfig, dims, seed) -> dict:
     """One run with the coordinates ``dims`` dispersed: pilot, then main (module
-    doc). Returns the Greeks this group identifies and the widths it used."""
+    doc). Returns the Greeks this group identifies, the widths it used and its
+    number of main paths N."""
+    cfg = run_config(cfg, dims)
     rng = np.random.default_rng(seed)
     alphas, scale, rules = pilot(spec, cfg, dims, rng)
     z = isd_multi(spec, cfg, alphas, rng)
@@ -744,7 +768,9 @@ def run_group(spec: PutSpec, cfg: MultiConfig, dims, seed) -> dict:
         # applied to them (no random numbers used, so the label above is unchanged)
         _, Y_ins, _ = lsm_multi(spec, cfg, z, W, alphas, None)
         out["ins"] = greeks_multi(spec, cfg, dims, z, Y_ins, add)
+        out["ins"]["N"] = cfg.N
     out.update({f"alpha_{k}": float(v) for k, v in alphas.items()})
+    out["N"] = cfg.N
     return out
 
 
@@ -772,15 +798,18 @@ def label(spec: PutSpec, cfg: MultiConfig, seed) -> dict:
 
 def _assemble(spec: PutSpec, cfg: MultiConfig, runs) -> dict:
     """Label from the runs' Greeks: price, Delta, Gamma from the run in S alone if
-    any, else averaged; the others from the runs that identify them; Theta from
-    the PDE identity; exercise values when exercising at t_0 is optimal."""
+    any, else averaged over the runs weighted by their main paths N (the
+    inverse of their variance); the others from the runs that identify them;
+    Theta from the PDE identity; exercise values when exercising at t_0 is
+    optimal."""
     out = {}
     s_only = [r for dims, r in zip(cfg.groups, runs) if tuple(dims) == ("S",)]
     for name in GREEKS:                # only the Greeks some group identifies
         src = s_only if name in S_GREEKS and s_only else runs
-        vals = [r[name] for r in src if not np.isnan(r[name])]
-        if vals:
-            out[name] = float(np.mean(vals))
+        src = [r for r in src if not np.isnan(r[name])]
+        if src:
+            out[name] = float(np.average([r[name] for r in src],
+                                         weights=[r.get("N", 1) for r in src]))
     out["theta"], out["ex_region"] = theta_pde(spec, out["price"], out["delta"], out["gamma"])
     out["european_region"] = False
     if cfg.american_t0 and cfg.style == "bermudan" and out["ex_region"]:
@@ -850,11 +879,12 @@ def european_label(spec: PutSpec, cfg: MultiConfig) -> dict:
 def design_config(design: str, exercise_rule: str = "pilot", budget: int = 400_000,
                   **kw) -> MultiConfig:
     """MultiConfig for a label design (DESIGNS) with ``budget`` main and
-    ``budget`` pilot paths per label, split evenly over its runs.
+    ``budget`` pilot paths per label, split evenly over its runs (run_paths=()).
     exercise_rule: "pilot" (out of sample) or "insample" (the pilot still
     chooses the widths; the rule is fitted on the main paths)."""
     groups = DESIGNS[design]
     n = int(round(budget / len(groups)))
+    kw.setdefault("run_paths", ())         # the tournament's even split
     if design in ("D3", "D4"):          # joint runs: order 3 in sigma, 2 in r and d
         kw.setdefault("t0_max_order", (("sigma", 3), ("r", 2), ("d", 2)))
     kw.setdefault("label_source", "oos")   # the tournament's labels

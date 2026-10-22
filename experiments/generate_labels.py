@@ -1,13 +1,24 @@
 """Generate labels (price and Greeks) for a sample of Bermudan puts. Not part of
 the paper.
 
-Options are drawn on scrambled Sobol points (seeded) over strike, volatility,
-rate, dividend yield and maturity at a fixed S0, then rounded to readable
-values. Each label is one call of simgreeks.multi.label with the default
-MultiConfig; labels scale exactly with (S0, K), so S0 only sets the units.
+Options are drawn on scrambled Sobol points (seeded) over moneyness,
+volatility, rate, dividend yield and maturity at a fixed S0, then rounded:
+
+    S0/K   uniform on [0.8, 1.2]; K = S0 / (S0/K) rounded to 0.01
+    sigma  plateau on [5 %, 50 %] with tails to 1 % and 54 %
+           (simgreeks.sampling.plateau_ppf; --sigma-tail sets their shape), step 0.01 %
+    r, d   uniform on [0, 5 %], step 0.25 % (so the shrinking windows min(0.03, r0)
+           are >= 0.25 %; r0 = 0 is exact)
+    T      uniform on [1 month, 2 years], step 0.001
+
+Each label is one call of simgreeks.multi.label with the default MultiConfig
+(the sigma run gets 2x the main paths, the r and d runs half; see
+multi.RUN_PATHS); labels scale exactly with (S0, K), so S0 only sets the units.
+At T = 1 month a label has round(50 / 12) = 4 exercise dates.
 
     python experiments/generate_labels.py [--n 100] [--S0 100] [--workers N]
-                                          [--seed 1] [--exact] [--out PATH]
+                                          [--seed 1] [--sigma-tail cosine]
+                                          [--exact] [--out PATH]
 
 Writes one CSV row per option: the inputs, the label (price, delta, gamma,
 theta, vega, volga, vanna, rho, phi, delta_r, delta_d, ex_region, alpha_S,
@@ -63,25 +74,30 @@ from simgreeks.core import PutSpec  # noqa: E402
 from simgreeks.multi import MultiConfig, label  # noqa: E402
 from simgreeks.reference import put_fd_greeks  # noqa: E402
 from simgreeks.runner import job_seed  # noqa: E402
+from simgreeks.sampling import SIGMA_BOUNDS, TAILS, plateau_ppf  # noqa: E402
 
 GREEKS = ["price", "delta", "gamma", "theta", "vega", "volga", "vanna", "rho", "phi",
           "delta_r", "delta_d"]
 INPUTS = ["id", "S0", "K", "sigma", "r", "d", "T"]
 EXTRA = ["ex_region", "alpha_S", "alpha_sigma"]
-# (low, high, rounding step) of each input; K as a fraction of S0
-RANGES = {"K": (0.85, 1.15, 0.01), "sigma": (0.10, 0.40, 0.01), "r": (0.0, 0.06, 0.0025),
-          "d": (0.0, 0.04, 0.0025), "T": (0.25, 2.0, 0.05)}
+# (low, high, rounding step) of each input drawn uniformly; "moneyness" is S0/K.
+# sigma: SIGMA_BOUNDS (plateau and tails), rounded to SIGMA_STEP
+RANGES = {"moneyness": (0.8, 1.2, None), "r": (0.0, 0.05, 0.0025),
+          "d": (0.0, 0.05, 0.0025), "T": (1 / 12, 2.0, 0.001)}
+SIGMA_STEP = 0.0001
 
 
-def sample_options(n: int, S0: float, seed: int) -> pd.DataFrame:
+def sample_options(n: int, S0: float, seed: int, sigma_tail: str = "cosine") -> pd.DataFrame:
     with warnings.catch_warnings():           # n need not be a power of 2 here
         warnings.simplefilter("ignore", UserWarning)
-        U = qmc.Sobol(d=len(RANGES), scramble=True, seed=seed).random(n)
+        U = qmc.Sobol(d=len(RANGES) + 1, scramble=True, seed=seed).random(n)
     cols = {}
     for j, (k, (lo, hi, step)) in enumerate(RANGES.items()):
-        cols[k] = np.round((lo + (hi - lo) * U[:, j]) / step) * step
+        x = lo + (hi - lo) * U[:, j]
+        cols[k] = x if step is None else np.round(x / step) * step
+    cols["sigma"] = np.round(plateau_ppf(U[:, -1], SIGMA_BOUNDS, sigma_tail) / SIGMA_STEP) * SIGMA_STEP
     df = pd.DataFrame(cols)
-    df["K"] = np.round(df["K"] * S0, 2)
+    df.insert(0, "K", np.round(S0 / df.pop("moneyness"), 2))
     df.insert(0, "S0", S0)
     df.insert(0, "id", np.arange(n))
     return df.round(6)
@@ -124,6 +140,8 @@ def main():
     ap.add_argument("--n", type=int, default=100)
     ap.add_argument("--S0", type=float, default=100.0)
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--sigma-tail", choices=sorted(TAILS), default="cosine",
+                    help="shape of the sigma tails (1-5 %% and 50-54 %%; simgreeks.sampling)")
     ap.add_argument("--workers", type=int, default=None)
     ap.add_argument("--exact", action="store_true",
                     help="add the reference PDE values (for checking the labels)")
@@ -133,12 +151,13 @@ def main():
 
     columns = INPUTS + GREEKS + EXTRA + ([f"exact_{g}" for g in GREEKS] if args.exact else [])
     settings = json.dumps(dict(n=args.n, S0=args.S0, seed=args.seed, exact=args.exact,
-                               ranges=RANGES), sort_keys=True)
+                               ranges=RANGES, sigma=SIGMA_BOUNDS, sigma_tail=args.sigma_tail),
+                          sort_keys=True)
     partial = args.out.with_name(args.out.stem + ".partial.csv")
     meta = args.out.with_name(args.out.stem + ".partial.json")
     args.out.parent.mkdir(parents=True, exist_ok=True)
 
-    opts = sample_options(args.n, args.S0, args.seed)
+    opts = sample_options(args.n, args.S0, args.seed, args.sigma_tail)
     done = set()
     if partial.exists():
         if not meta.exists() or meta.read_text() != settings:

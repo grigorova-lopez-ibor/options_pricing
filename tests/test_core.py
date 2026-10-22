@@ -538,3 +538,35 @@ def test_multi_vf_time():
     b = label(spec, MultiConfig(N=20_000, vf_time=0.02), 4)
     assert all(a[q] == b[q] for q in ("price", "delta", "gamma", "vega", "rho", "phi"))
     assert vf_index(replace(spec, steps_per_year=252), MultiConfig(vf_time=0.02)) == 5
+
+
+def test_sigma_plateau_sampler():
+    from simgreeks.sampling import TAILS, plateau_pdf, plateau_ppf, tail_share
+    u = (np.arange(100_000) + 0.5) / 100_000
+    for tail in TAILS:
+        x = plateau_ppf(u, tail=tail)
+        assert 0.01 <= x.min() and x.max() <= 0.54 and np.all(np.diff(x) >= 0)
+        assert abs(np.mean((x < 0.05) | (x > 0.50)) - tail_share(tail=tail)) < 1e-3
+        mid = x[(x >= 0.05) & (x <= 0.50)]          # uniform on the plateau
+        assert abs(np.mean(mid < 0.275) - 0.5) < 1e-3
+        g = np.linspace(0.01, 0.54, 100_001)
+        assert abs(np.trapezoid(plateau_pdf(g, tail=tail), g) - 1) < 1e-6
+    assert abs(tail_share(tail="linear") - 4 / 49) < 1e-6   # tails 4 + 4 points at half density
+
+
+def test_multi_run_paths():
+    from simgreeks.multi import MultiConfig, _assemble, design_config, run_config
+    from simgreeks.core import PutSpec
+    cfg = MultiConfig(N=20_000)
+    assert (run_config(cfg, ("S", "sigma")).N, run_config(cfg, ("S", "sigma")).N_pilot) == (40_000, 20_000)
+    assert (run_config(cfg, ("S", "r")).N, run_config(cfg, ("S", "r")).N_pilot) == (10_000, 10_000)
+    assert run_config(cfg, ("S",)).N == 20_000                     # not listed: N
+    assert run_config(MultiConfig(N=20_000, run_paths=()), ("S", "sigma")).N == 20_000
+    assert design_config("D2").run_paths == ()
+    # price, Delta, Gamma averaged with weights N
+    base = dict(price=1.0, delta=-0.5, gamma=0.1, vega=np.nan, volga=np.nan, rho=np.nan,
+                phi=np.nan, vanna=np.nan, vera=np.nan, delta_r=np.nan, delta_d=np.nan,
+                dvega_dd=np.nan, drho_dd=np.nan)
+    runs = [dict(base, price=2.0, N=40_000), dict(base, N=10_000), dict(base, N=10_000)]
+    out = _assemble(PutSpec(), cfg, runs)
+    assert abs(out["price"] - (2 * 4 + 1 + 1) / 6) < 1e-12
