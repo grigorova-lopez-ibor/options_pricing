@@ -37,8 +37,10 @@ OPTIONS = [PutSpec(S0=40, K=40, sigma=0.20, r=0.04, d=0.01, T=0.5),
 G = ["price", "delta", "gamma", "rho", "phi", "delta_r", "delta_d"]
 
 
-def exercise_paths(spec, cfg, z, W, scale, rules):
-    """tau (years), S_tau and the in-the-money indicator at exercise for the stored rule."""
+def exercise_paths(spec, cfg, z, W, scale, rules, euro_bound=False):
+    """tau (years), S_tau and the in-the-money indicator at exercise for the stored rule.
+    euro_bound: exercise only where the payoff is at least the European value
+    (the American continuation value is never below it)."""
     J, N = spec.J, len(z["S"])
     params, P, Pk = m._params(spec, z, scale)
     mono, index = m.monomials(P, m.basis_terms(cfg.M_tau, len(params), cfg.weight,
@@ -55,13 +57,16 @@ def exercise_paths(spec, cfg, z, W, scale, rules):
             continue
         e = np.zeros(N, dtype=bool)
         e[itm] = ex[itm] >= m._predict(fit, Sj[itm], mono[itm], index, cfg.M_tau)
+        if euro_bound:
+            e[itm] &= ex[itm] >= m.european_value(spec, Sj[itm], spec.T - j * spec.dt,
+                                                  z["sigma"][itm], z["r"][itm], z["d"][itm])
         jt[e], St[e] = j, Sj[e]
         alive &= ~e
     return jt * spec.dt, St, St < spec.K, m.stock_at(spec, z, W, J)
 
 
-def pathwise(spec, cfg, z, W, scale, rules):
-    tau, St, itm, ST = exercise_paths(spec, cfg, z, W, scale, rules)
+def pathwise(spec, cfg, z, W, scale, rules, euro_bound=False):
+    tau, St, itm, ST = exercise_paths(spec, cfg, z, W, scale, rules, euro_bound)
     r, K, T = spec.r, spec.K, spec.T
     eu_itm = ST < K
     y_rho = -tau * K * np.exp(-r * tau) * itm + T * K * np.exp(-r * T) * eu_itm
