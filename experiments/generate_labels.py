@@ -12,8 +12,9 @@ volatility, rate, dividend yield and maturity at a fixed S0, then rounded:
     T      uniform on [2 months, 2 years], step 0.001
 
 Each label is one call of simgreeks.multi.label with the default MultiConfig
-(the sigma run gets 2x the main paths, the r and d runs half; see
-multi.RUN_PATHS); labels scale exactly with (S0, K), so S0 only sets the units.
+(one (S, sigma) run of 400,000 main + 100,000 pilot paths; Rho, Phi, dDelta/dr
+and dDelta/dd pathwise on its paths, see multi.RD_GREEKS); labels scale exactly
+with (S0, K), so S0 only sets the units.
 At T = 2 months a label has round(50 / 6) = 8 exercise dates.
 
     python experiments/generate_labels.py [--n 100] [--S0 100] [--workers N]

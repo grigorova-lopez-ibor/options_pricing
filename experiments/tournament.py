@@ -70,7 +70,7 @@ import pandas as pd  # noqa: E402
 from scipy.stats import qmc  # noqa: E402
 
 from simgreeks.core import PutSpec  # noqa: E402
-from simgreeks.multi import DESIGNS, GREEKS, MultiConfig, design_config, label  # noqa: E402
+from simgreeks.multi import DESIGNS, GREEKS, GROUPS, MultiConfig, design_config, label  # noqa: E402
 from simgreeks.reference import (FORWARD_GREEKS, LABEL_GREEKS, bs_put,  # noqa: E402
                                  label_reference)
 from simgreeks.runner import job_seed  # noqa: E402
@@ -100,7 +100,7 @@ CALL_CELLS = ([(T, s, 0.06, 0.04, K) for T in (0.5, 1.0, 2.0) for s in (0.10, 0.
 AMD_RANDOM_START, AMD_RANDOM_N = 20_000, 1_000  # Stage B uses points 0-19,999
 # production check: the 33 American check options plus r0 = d0 = 1 %, K = 40, 44 (sigma 20 %, T = 1)
 EXTRA_CELLS = [(1.0, 0.20, 0.01, 0.01, 40), (1.0, 0.20, 0.01, 0.01, 44)]
-PROD_VARIANT = "D2-prod"     # MultiConfig() defaults: D2, out-of-sample rule, 100,000 paths per run
+PROD_VARIANT = "D2-prod"     # D2 (config_of), out-of-sample rule, 100,000 paths per run
 # Extra variants, run on request (--variants) and included in the reports:
 #   D3o3-oos  : D3 with order 3 in sigma, r and d at t = 0 (instead of 2 in r, d), tournament budget
 #   D3o3-prod : the same with production settings, 100,000 main + 100,000 pilot paths per run
@@ -108,7 +108,7 @@ ORDER3 = (("sigma", 3), ("r", 3), ("d", 3))
 #   D2-avg    : D2-prod plus the in-sample label on the same main paths; stores the
 #               out-of-sample label (plain columns), <greek>_ins and <greek>_avg
 EXTRA_VARIANTS = ["D3o3-oos", "D3o3-prod", PROD_VARIANT, "D2-avg"]
-STAGE2_VARIANT = "D2-hybrid"   # MultiConfig() defaults: the default label
+STAGE2_VARIANT = "D2-hybrid"   # D2 (config_of), hybrid: the default label of the time
 VARIANTS = [f"{d}-{rule}" for d in DESIGNS for rule in ("oos", "ins")]
 EU_VARIANTS = ["D3-eu", "D4-eu"]
 INPUT_COLS = ["S0", "K", "sigma", "r", "d", "T"]
@@ -184,17 +184,21 @@ def spec_of(row) -> PutSpec:
                    r=float(row["r"]), d=float(row["d"]), T=float(row["T"]), **extra)
 
 
+D2 = dict(groups=GROUPS, run_paths=(), rd_greeks="runs")
+
+
 def config_of(variant: str) -> MultiConfig:
-    # run_paths=(): these variants were run with 100,000 + 100,000 paths in every
-    # run, before the default gave the sigma run more; kept so resumed jobs match
+    # D2: these variants were run with the three runs (S, sigma), (S, r), (S, d) of
+    # 100,000 + 100,000 paths each, before the default became one (S, sigma) run
+    # with pathwise r and d Greeks; kept so resumed jobs match
     if variant == PROD_VARIANT:
-        return MultiConfig(label_source="oos", run_paths=())
+        return MultiConfig(label_source="oos", **D2)
     if variant == "D2-avg":
-        return MultiConfig(insample_too=True, label_source="oos", run_paths=())
+        return MultiConfig(insample_too=True, label_source="oos", **D2)
     if variant == STAGE2_VARIANT or variant == "D2-daily":
-        return MultiConfig(run_paths=())
+        return MultiConfig(**D2)
     if variant == "D2-daily-vf50":
-        return MultiConfig(vf_time=0.02, run_paths=())
+        return MultiConfig(vf_time=0.02, **D2)
     if variant == "D3o3-oos":
         # the tournament's alpha_d rule (min(0.03, r0)), so only the t = 0 order differs from D3-oos
         return design_config("D3", "pilot", t0_max_order=ORDER3, alpha_d_shrink="r0")

@@ -4,8 +4,8 @@ method (Section 3.2) and 2-step method (Section 3.4) from S to the model
 parameters.
 
 A label is built from independent runs, one per group of dispersed coordinates
-(default: (S, sigma), (S, r), (S, d)). In a run, each path n starts from its
-own z_n, e.g. for the group (S, sigma)
+(default: a single run in (S, sigma); design D2: (S, sigma), (S, r), (S, d)).
+In a run, each path n starts from its own z_n, e.g. for the group (S, sigma)
 
     z_n = z0 + (alpha_S k_S(U_n1), alpha_sigma k_p(U_n2), 0, 0),
 
@@ -73,6 +73,18 @@ Why the pilot. Anything estimated on the same paths as the Greeks biases them:
 widths="fixed" skips the selection and uses the placeholder widths
 alpha_S = c_S S0 sigma sqrt(T), alpha_sigma = c_sigma sigma, alpha_r, alpha_d.
 
+r and d Greeks (rd_greeks="pathwise", default). r and d enter a path only
+through its drift (and r through the discounting), so the effect of r and d on
+each path is known exactly: Rho, Phi, dDelta/dr and dDelta/dd are pathwise
+derivatives of the discounted payoff with the exercise time held fixed
+(pathwise_labels), regressed on the run's t = 0 Taylor basis, with the
+European control variate and the European bound on exercise
+(MultiConfig.pathwise_bound). No paths disperse r or d. Checks against the
+PDE reference (results/diagnostics/rd_pathwise/): noise of one label 0.1-5 %
+for Rho and Phi against 7-40 % with (S, r) and (S, d) runs, no bias at small
+r0 and d0 where the runs' windows were 2-8 % off. rd_greeks="runs" with
+groups=GROUPS gives the earlier design.
+
 Price, Delta and Gamma come from the run in S alone when the design has one
 (DESIGNS D1, D3), else they are averaged over the runs, weighted by each run's
 main paths (MultiConfig.run_paths gives the sigma run more); each parameter Greek
@@ -113,14 +125,19 @@ PARAM_KERNELS = ("uniform", "epanechnikov")
 WIDTHS = ("selector", "fixed")
 NU = {"S": 2, "sigma": 2}          # derivative each selected width is optimised for
 #                                    (r, d: MultiConfig.nu_rd)
-GROUPS = (("S", "sigma"), ("S", "r"), ("S", "d"))
-# Paths of each run as multiples of (N, N_pilot): (group, main factor, pilot factor).
-# Sigma is the key input, so its run gets 2x the main paths and r and d half of
-# both (default N = 100,000: (S, sigma) 200,000 main + 100,000 pilot, (S, r) and
-# (S, d) 50,000 + 50,000 each; 500,000 paths per label instead of 600,000). The
-# noise of a Greek scales as 1/sqrt(paths): Vega, Volga, Vanna x 0.71, Rho, Phi
-# x 1.41 against equal runs. Groups not listed use (N, N_pilot).
-RUN_PATHS = ((("S", "sigma"), 2.0, 1.0), (("S", "r"), 0.5, 0.5), (("S", "d"), 0.5, 0.5))
+GROUPS = (("S", "sigma"), ("S", "r"), ("S", "d"))   # rd_greeks="runs" (design D2)
+# Default (rd_greeks="pathwise"): one run in (S, sigma); Rho, Phi, dDelta/dr and
+# dDelta/dd are pathwise derivatives on its paths (see lsm_multi), so the paths
+# of the former (S, r) and (S, d) runs go to it.
+PATHWISE_GROUPS = (("S", "sigma"),)
+RD_GREEKS = ("pathwise", "runs")
+# Paths of each run as multiples of (N, N_pilot): (group, main factor, pilot factor);
+# groups not listed use (N, N_pilot). Default N = 100,000: the (S, sigma) run has
+# 400,000 main + 100,000 pilot paths, the 500,000 paths per label of the earlier
+# three-run split RUN_PATHS_RD ((S, sigma) 200,000 + 100,000, (S, r) and (S, d)
+# 50,000 + 50,000 each).
+RUN_PATHS = ((("S", "sigma"), 4.0, 1.0),)
+RUN_PATHS_RD = ((("S", "sigma"), 2.0, 1.0), (("S", "r"), 0.5, 0.5), (("S", "d"), 0.5, 0.5))
 # Vera (d2P / dsigma dr) needs sigma and r in one run: add the group
 # ("S", "sigma", "r"), which takes about 40 % of the time of a 4-run label.
 
@@ -168,7 +185,7 @@ OUTPUTS = tuple(GREEKS) + ("theta",)
 @dataclass(frozen=True)
 class MultiConfig:
     N: int = 100_000               # main paths per run (one run per group), times run_paths' factor
-    groups: tuple = GROUPS         # dispersed coordinates of each run; each contains "S"
+    groups: tuple = PATHWISE_GROUPS  # dispersed coordinates of each run; each contains "S"
     run_paths: tuple = RUN_PATHS   # (group, main factor, pilot factor); () for N and N_pilot in every run
     # widths of the dispersion
     widths: str = "selector"       # "selector" (pilot chooses `select`) or "fixed"
@@ -198,6 +215,9 @@ class MultiConfig:
     control_variate: bool = True   # European control variate (see module doc)
     vf_rule: str = "rule"          # V(t_1) by the exercise rule (default) or max(Z, C_1); see lsm_multi
     american_t0: bool = True       # exercise at t_0 when optimal (bermudan only)
+    rd_greeks: str = "pathwise"    # Rho, Phi, dDelta/dr, dDelta/dd: "pathwise" on the runs that do not
+    #                                disperse r or d, or "runs" (from runs that do, e.g. GROUPS)
+    pathwise_bound: bool = True    # pathwise: exercise only where the payoff >= the European value
     rd_floor: bool = False         # one-sided r, d spread [max(0, x0 - alpha), x0 + alpha] when x0 >= 0
     kink_r: bool = False           # truncated-power basis in r with a knot at r = 0 (see kink_index)
     alpha_r_shrink: bool = True    # fixed alpha_r = min(alpha_r, r0) for r0 > 0, so the window stays in r >= 0
@@ -233,6 +253,11 @@ class MultiConfig:
             if len(entry) != 3 or not entry[1] > 0 or not entry[2] > 0:
                 raise ValueError("run_paths entries must be (group, main factor > 0, "
                                  f"pilot factor > 0), got {entry!r}")
+        if self.rd_greeks not in RD_GREEKS:
+            raise ValueError(f"unknown rd_greeks {self.rd_greeks!r}")
+        if self.rd_greeks == "pathwise" and any({"r", "d"} & set(g) for g in self.groups):
+            raise ValueError('rd_greeks="pathwise" takes Rho and Phi from runs without r or d; '
+                             'use rd_greeks="runs" with groups that disperse r or d')
         if self.pilot_widen < 1:
             raise ValueError("pilot_widen must be >= 1")
         if not 0 < self.c0_sigma < 1 or not 0 < self.c_sigma * self.pilot_widen < 1:
@@ -531,9 +556,14 @@ def kink_index(spec: PutSpec, cfg: MultiConfig, params) -> int | None:
 # LSM and the t = 0 Taylor regression
 # --------------------------------------------------------------------------
 def lsm_multi(spec: PutSpec, cfg: MultiConfig, z: dict, W: np.ndarray, scale: dict,
-              rules: dict | None = None, value_function: bool = True):
+              rules: dict | None = None, value_function: bool = True,
+              pathwise: dict | None = None):
     """LSM with per-path parameters. Returns (Y_naive, Y_vf, rules), Y_naive and
     Y_vf discounted to t = 0.
+
+    ``pathwise``: a dict, filled with the per-path pathwise derivatives "rho"
+    and "phi" (pathwise_labels) along the exercise rule used here, with
+    cfg.pathwise_bound also requiring the payoff >= the European value.
 
     ``scale`` has one width per dispersed coordinate: the parameters enter the
     bases as (z_k - z0_k) / scale[k]. Stored rules must be applied with the
@@ -556,9 +586,14 @@ def lsm_multi(spec: PutSpec, cfg: MultiConfig, z: dict, W: np.ndarray, scale: di
     mono_vf, index_vf = monomials(P, basis_terms(cfg.M_tau, len(params), cfg.weight_vf,
                                                  cfg.param_degree, kink), Pk)
     disc = np.exp(-z["r"] * spec.dt)
-    cash = spec.payoff(stock_at(spec, z, W, J))
+    S_T = stock_at(spec, z, W, J)
+    cash = spec.payoff(S_T)
     euro_payoff = cash.copy()
+    if pathwise is not None:          # exercise date and stock price of each path
+        t_ex, S_ex = np.full(N, spec.T), S_T.copy()
     if J == 1:
+        if pathwise is not None:
+            pathwise.update(pathwise_labels(spec, cfg, z, t_ex, S_ex, S_T))
         return disc * cash, disc * cash, {}
     Y_vf = None
     fits = {}
@@ -608,9 +643,55 @@ def lsm_multi(spec: PutSpec, cfg: MultiConfig, z: dict, W: np.ndarray, scale: di
                 else:
                     Y_vf = np.maximum(ex, cont)
         cash = np.where(exercise, ex, cash)
+        if pathwise is not None and exercise.any():
+            e = exercise.copy()
+            if cfg.pathwise_bound:
+                # the American continuation value is never below the European
+                # value, so exercising below it is always wrong; the fitted rule
+                # does it where early exercise is (almost) worthless, e.g. a put
+                # with r < d, which costs ~nothing in price but shortens tau
+                e[e] = ex[e] >= european_value(spec, Sj[e], spec.T - j * spec.dt,
+                                               z["sigma"][e], z["r"][e], z["d"][e])
+            t_ex[e], S_ex[e] = j * spec.dt, Sj[e]
+    if pathwise is not None:
+        pathwise.update(pathwise_labels(spec, cfg, z, t_ex, S_ex, S_T))
     if Y_vf is not None:
         Y_vf = disc * Y_vf
     return disc * cash, Y_vf, fits
+
+
+def pathwise_labels(spec: PutSpec, cfg: MultiConfig, z: dict, tau, S_tau, S_T) -> dict:
+    """Per-path pathwise derivatives of the discounted payoff e^{-r tau} (s (S_tau - K))^+
+    (s = +1 call, -1 put) with respect to r and d, the exercise time tau held
+    fixed (envelope theorem: first-order exact for the optimal rule). r and d
+    only enter the drift, dS_tau/dr = tau S_tau = -dS_tau/dd, so
+        rho: s tau K e^{-r tau} 1{in the money},   phi: -s tau S_tau e^{-r tau} 1{in the money}.
+    With cfg.control_variate the same for the European payoff (tau = T) is
+    subtracted; its closed-form Greeks are added back (greeks_pathwise)."""
+    s, r = spec.sign, z["r"]
+    itm = spec.payoff(S_tau) > 0
+    out = {"rho": s * tau * spec.K * np.exp(-r * tau) * itm,
+           "phi": -s * tau * S_tau * np.exp(-r * tau) * itm}
+    if cfg.control_variate:
+        itm_T, dT = spec.payoff(S_T) > 0, spec.T * np.exp(-r * spec.T)
+        out["rho"] = out["rho"] - s * spec.K * dT * itm_T
+        out["phi"] = out["phi"] + s * S_T * dT * itm_T
+    return out
+
+
+def greeks_pathwise(spec: PutSpec, cfg: MultiConfig, dims, z: dict, Y: np.ndarray,
+                    pw: dict, add: dict | None) -> dict:
+    """greeks_multi, plus Rho and Phi at z0 (intercepts) and dDelta/dr, dDelta/dd
+    (S-slopes) from the t = 0 Taylor regression of the per-path pathwise
+    derivatives ``pw``, plus the closed-form European values ``add`` (control
+    variate). One least-squares solve for the three right-hand sides."""
+    fit = taylor_fit(spec, cfg, z, np.column_stack([Y, pw["rho"], pw["phi"]]), dims)
+    out = greeks_from(replace(fit, coef=fit.coef[:, 0]), add)
+    for col, (name, cross) in enumerate((("rho", "delta_r"), ("phi", "delta_d")), 1):
+        g = greeks_from(replace(fit, coef=fit.coef[:, col]))
+        out[name] = g["price"] + (add or {}).get(name, 0.0)
+        out[cross] = g["delta"] + (add or {}).get(cross, 0.0)
+    return out
 
 
 def vf_index(spec: PutSpec, cfg: MultiConfig) -> int:
@@ -760,14 +841,22 @@ def run_group(spec: PutSpec, cfg: MultiConfig, dims, seed) -> dict:
     alphas, scale, rules = pilot(spec, cfg, dims, rng)
     z = isd_multi(spec, cfg, alphas, rng)
     W = brownian(spec, cfg.N, rng)
-    _, Y, _ = lsm_multi(spec, cfg, z, W, scale, rules)
+    pw = {} if cfg.rd_greeks == "pathwise" and not {"r", "d"} & set(dims) else None
+    _, Y, _ = lsm_multi(spec, cfg, z, W, scale, rules, pathwise=pw)
     add = bs_option(spec) if cfg.control_variate else None
-    out = greeks_multi(spec, cfg, dims, z, Y, add)
+    if pw is not None:
+        out = greeks_pathwise(spec, cfg, dims, z, Y, pw, add)
+    else:
+        out = greeks_multi(spec, cfg, dims, z, Y, add)
     if _with_ins(cfg) and cfg.style == "bermudan" and rules is not None:
         # the in-sample label: the exercise rule refitted on these main paths and
         # applied to them (no random numbers used, so the label above is unchanged)
-        _, Y_ins, _ = lsm_multi(spec, cfg, z, W, alphas, None)
-        out["ins"] = greeks_multi(spec, cfg, dims, z, Y_ins, add)
+        pw_ins = {} if pw is not None else None
+        _, Y_ins, _ = lsm_multi(spec, cfg, z, W, alphas, None, pathwise=pw_ins)
+        if pw_ins is not None:
+            out["ins"] = greeks_pathwise(spec, cfg, dims, z, Y_ins, pw_ins, add)
+        else:
+            out["ins"] = greeks_multi(spec, cfg, dims, z, Y_ins, add)
         out["ins"]["N"] = cfg.N
     out.update({f"alpha_{k}": float(v) for k, v in alphas.items()})
     out["N"] = cfg.N
@@ -885,6 +974,7 @@ def design_config(design: str, exercise_rule: str = "pilot", budget: int = 400_0
     groups = DESIGNS[design]
     n = int(round(budget / len(groups)))
     kw.setdefault("run_paths", ())         # the tournament's even split
+    kw.setdefault("rd_greeks", "runs")
     if design in ("D3", "D4"):          # joint runs: order 3 in sigma, 2 in r and d
         kw.setdefault("t0_max_order", (("sigma", 3), ("r", 2), ("d", 2)))
     kw.setdefault("label_source", "oos")   # the tournament's labels
