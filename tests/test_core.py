@@ -562,7 +562,7 @@ def test_multi_run_paths():
                                  run_config)
     from simgreeks.core import PutSpec
     cfg = MultiConfig(N=20_000)
-    assert (run_config(cfg, ("S", "sigma")).N, run_config(cfg, ("S", "sigma")).N_pilot) == (80_000, 20_000)
+    assert (run_config(cfg, ("S", "sigma")).N, run_config(cfg, ("S", "sigma")).N_pilot) == (60_000, 20_000)
     assert run_config(cfg, ("S",)).N == 20_000                     # not listed: N
     rd = MultiConfig(N=20_000, run_paths=RUN_PATHS_RD, groups=GROUPS, rd_greeks="runs")
     assert (run_config(rd, ("S", "r")).N, run_config(rd, ("S", "r")).N_pilot) == (10_000, 10_000)

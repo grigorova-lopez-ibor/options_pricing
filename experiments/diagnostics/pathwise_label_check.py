@@ -54,7 +54,7 @@ def summarise(df, ref):
     df = df[~df.ex_region]
     lines = ["# Default label (pathwise r and d) against design D2", "",
              "Not part of the paper. `experiments/diagnostics/pathwise_label_check.py`. new = "
-             "MultiConfig() (one (S, sigma) run, 400k main + 100k pilot, pathwise r and d "
+             "MultiConfig() (one (S, sigma) run, 300k main + 100k pilot, pathwise r and d "
              "Greeks); D2 = the label before the carlos branch ((S, sigma), (S, r), (S, d), "
              "100k + 100k each). Per part: bias = mean over options of the signed relative "
              "error of the option's mean label (± se over options), typical error = mean "

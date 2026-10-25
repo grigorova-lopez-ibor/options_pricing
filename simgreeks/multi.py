@@ -133,10 +133,12 @@ PATHWISE_GROUPS = (("S", "sigma"),)
 RD_GREEKS = ("pathwise", "runs")
 # Paths of each run as multiples of (N, N_pilot): (group, main factor, pilot factor);
 # groups not listed use (N, N_pilot). Default N = 100,000: the (S, sigma) run has
-# 400,000 main + 100,000 pilot paths, the 500,000 paths per label of the earlier
-# three-run split RUN_PATHS_RD ((S, sigma) 200,000 + 100,000, (S, r) and (S, d)
+# 300,000 main + 100,000 pilot paths (13.0 s per label at T = 1 on one core,
+# against 14.5 s for D2's three runs of 100,000 + 100,000; 400,000 main paths
+# took 17.4 s, as the hybrid label processes the main paths twice). The earlier
+# three-run split: RUN_PATHS_RD ((S, sigma) 200,000 + 100,000, (S, r) and (S, d)
 # 50,000 + 50,000 each).
-RUN_PATHS = ((("S", "sigma"), 4.0, 1.0),)
+RUN_PATHS = ((("S", "sigma"), 3.0, 1.0),)
 RUN_PATHS_RD = ((("S", "sigma"), 2.0, 1.0), (("S", "r"), 0.5, 0.5), (("S", "d"), 0.5, 0.5))
 # Vera (d2P / dsigma dr) needs sigma and r in one run: add the group
 # ("S", "sigma", "r"), which takes about 40 % of the time of a 4-run label.
