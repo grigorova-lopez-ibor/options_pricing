@@ -80,12 +80,21 @@ N_OPTIONS = 2500
 INPUT_SEED = 20261011
 BASE_SEED = {"european": 8001, "american": 8002, "tournament": 8003, "production_check": 8004,
              "production_avg": 8005, "stage2": 8006, "stage2_noise": 8007,
-             "amd_check": 8010, "amd_random": 8011}
+             "amd_check": 8010, "amd_random": 8011, "tpd_check": 8020, "tpd_random": 8021}
 REPS = {"european": 100, "american": 50, "tournament": 1, "production_check": 100, "production_avg": 100,
-        "stage2": 1, "stage2_noise": 30, "amd_check": 100, "amd_random": 1}
+        "stage2": 1, "stage2_noise": 30, "amd_check": 100, "amd_random": 1,
+        "tpd_check": 100, "tpd_random": 100}
 N_STAGE2 = 10_000
 NOISE_STEP = 50                 # stage2_noise: options 0, 50, ..., 9950
-REF_PARTS = ("reference", "stage2_ref", "amd_check_ref", "amd_random_ref")
+REF_PARTS = ("reference", "stage2_ref", "amd_check_ref", "amd_random_ref", "tpd_check_ref",
+             "tpd_random_ref")
+# Puts with two exercise dates per business day (504 a year), the default label
+# (one (S, sigma) run, pathwise r, d, Theta and Charm) with the value-function
+# label at 1/50 year: the 35 put check options and TPD_RANDOM_N options drawn by
+# generate_labels.sample_options (its ranges) with seed TPD_SEED, 100 labels each
+TPD_SPY = 504
+TPD_VARIANTS = ["PW-504"]
+TPD_RANDOM_N, TPD_SEED = 40, 504
 # American options with daily exercise
 AMD_SPY = 252
 AMD_VARIANTS = ["D2-daily", "D2-daily-vf50"]   # value-function label at t_1 / at 1/50 year
@@ -112,7 +121,7 @@ STAGE2_VARIANT = "D2-hybrid"   # D2 (config_of), hybrid: the default label of th
 VARIANTS = [f"{d}-{rule}" for d in DESIGNS for rule in ("oos", "ins")]
 EU_VARIANTS = ["D3-eu", "D4-eu"]
 INPUT_COLS = ["S0", "K", "sigma", "r", "d", "T"]
-OUT_GREEKS = list(GREEKS) + ["theta"]
+OUT_GREEKS = list(GREEKS) + ["theta", "theta_pde", "charm"]
 EXTRA = ["ex_region", "european_region", "alpha_S", "alpha_sigma", "alpha_r", "alpha_d"]
 
 
@@ -145,6 +154,8 @@ def inputs(n: int = N_OPTIONS, start: int = 0) -> pd.DataFrame:
 def options(part: str) -> pd.DataFrame:
     if part.startswith("amd_"):
         return amd_options(part)
+    if part.startswith("tpd_"):
+        return tpd_options(part)
     if part == "tournament" or part == "reference":
         return inputs()
     if part in ("stage2", "stage2_ref"):
@@ -176,6 +187,19 @@ def amd_options(part: str) -> pd.DataFrame:
     return df
 
 
+def tpd_options(part: str) -> pd.DataFrame:
+    """Options of the two-per-day parts: puts, columns kind and spy."""
+    if part.startswith("tpd_check"):
+        from experiments.multi_check import american_grid
+        df = pd.DataFrame([dict(id=i, S0=S0, K=float(K), sigma=s, r=r, d=d, T=T)
+                           for i, (T, s, r, d, K) in enumerate(american_grid() + EXTRA_CELLS)])
+    else:
+        from experiments.generate_labels import sample_options
+        df = sample_options(TPD_RANDOM_N, S0, TPD_SEED)
+    df["kind"], df["spy"] = "put", TPD_SPY
+    return df
+
+
 def spec_of(row) -> PutSpec:
     extra = {}
     if "kind" in row:
@@ -197,6 +221,8 @@ def config_of(variant: str) -> MultiConfig:
         return MultiConfig(insample_too=True, label_source="oos", **D2)
     if variant == STAGE2_VARIANT or variant == "D2-daily":
         return MultiConfig(**D2)
+    if variant == "PW-504":
+        return MultiConfig(vf_time=0.02)
     if variant == "D2-daily-vf50":
         return MultiConfig(vf_time=0.02, **D2)
     if variant == "D3o3-oos":
@@ -219,6 +245,7 @@ def jobs_of(part: str, limit: int | None = None, variants=None):
     vs = variants or (EU_VARIANTS if part == "european" else
                       [STAGE2_VARIANT] if part.startswith("stage2") else
                       AMD_VARIANTS if part.startswith("amd_") else
+                      TPD_VARIANTS if part.startswith("tpd_") else
                       [PROD_VARIANT] if part == "production_check" else
                       ["D2-avg"] if part == "production_avg" else VARIANTS)
     return [(int(i), rep, v) for i in opts.id for rep in range(REPS[part]) for v in vs]
@@ -245,10 +272,11 @@ def one(part: str, opts: pd.DataFrame, job, mem: bool) -> dict:
     if mem:
         tracemalloc.start()
     t = time.perf_counter()
-    if part in ("amd_check_ref", "amd_random_ref"):
+    if part in ("amd_check_ref", "amd_random_ref", "tpd_check_ref", "tpd_random_ref"):
         am = label_reference(spec, style="american", vera=False)
         be = label_reference(spec, style="bermudan", vera=False)
-        qs = [q for q in LABEL_GREEKS if q != "vera"] + [f"{q}_fwd" for q in FORWARD_GREEKS]
+        qs = ([q for q in LABEL_GREEKS if q != "vera"] + ["charm"]
+              + [f"{q}_fwd" for q in FORWARD_GREEKS])
         out.update({q: am[q] for q in qs})
         out.update({f"berm_{q}": be[q] for q in qs})
         out["ex_region"], out["berm_ex_region"] = am["ex_region"], be["ex_region"]
@@ -473,7 +501,8 @@ def main():
     ap.add_argument("--part", required=True,
                     choices=["european", "american", "tournament", "reference", "timing", "production_check",
                              "production_avg", "stage2", "stage2_ref", "stage2_noise",
-                             "amd_check", "amd_check_ref", "amd_random", "amd_random_ref"])
+                             "amd_check", "amd_check_ref", "amd_random", "amd_random_ref",
+                             "tpd_check", "tpd_check_ref", "tpd_random", "tpd_random_ref"])
     ap.add_argument("--out", required=True)
     ap.add_argument("--task", type=int, default=0)
     ap.add_argument("--ntasks", type=int, default=1)

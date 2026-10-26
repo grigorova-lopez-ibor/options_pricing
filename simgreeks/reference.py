@@ -281,10 +281,10 @@ def label_reference(spec: PutSpec, grid: FDGrid | None = None, style: str = "ber
     * exercise region (immediate exercise optimal): price = exercise value,
       Delta = sign (-1 put, +1 call), the other Greeks 0, as in the labels
       (MultiConfig.american_t0).
-    Returns the LABEL_GREEKS (vera=False: without Vera), the <greek>_fwd values
-    and ex_region.
+    Returns the LABEL_GREEKS (vera=False: without Vera), Charm (calendar
+    dDelta/dt), the <greek>_fwd values and ex_region.
     """
-    greeks = [q for q in LABEL_GREEKS if vera or q != "vera"]
+    greeks = [q for q in LABEL_GREEKS if vera or q != "vera"] + ["charm"]
     if spec.no_early_exercise:
         eu = bs_option(spec)
         out = {q: float(eu[q]) for q in greeks}
