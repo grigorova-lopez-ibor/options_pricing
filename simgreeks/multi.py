@@ -193,8 +193,9 @@ class MultiConfig:
     widths: str = "selector"       # "selector" (pilot chooses `select`) or "fixed"
     select: tuple = ("S", "sigma")  # coordinates whose width the selector chooses
     c0_S: float = 0.25             # pilot alpha0_S = c0_S S0 (c0_S_rule="fixed")
-    c0_S_rule: str = "fixed"       # "sd": alpha0_S = min(c0_S, c0_S_sd sigma sqrt(T)) S0, the pilot
-    #                                scaled to the curved part of the price (low sigma sqrt(T))
+    c0_S_rule: str = "sd"          # "sd": alpha0_S = min(c0_S, c0_S_sd sigma sqrt(T)) S0, the pilot
+    #                                scaled to the curved part of the price (low sigma sqrt(T));
+    #                                results/diagnostics/low_vol_corner, pilot_width
     c0_S_sd: float = 1.25          # "sd": 1.25 sigma sqrt(T) = 0.25 at sigma = 20 %, T = 1
     c0_sigma: float = 0.6          # pilot alpha0_sigma = c0_sigma sigma
     alpha0_r: float = 0.05         # pilot alpha0_r (when "r" in select)
@@ -988,6 +989,7 @@ def design_config(design: str, exercise_rule: str = "pilot", budget: int = 400_0
     n = int(round(budget / len(groups)))
     kw.setdefault("run_paths", ())         # the tournament's even split
     kw.setdefault("rd_greeks", "runs")
+    kw.setdefault("c0_S_rule", "fixed")
     if design in ("D3", "D4"):          # joint runs: order 3 in sigma, 2 in r and d
         kw.setdefault("t0_max_order", (("sigma", 3), ("r", 2), ("d", 2)))
     kw.setdefault("label_source", "oos")   # the tournament's labels

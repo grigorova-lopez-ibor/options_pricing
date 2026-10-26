@@ -34,7 +34,7 @@ from simgreeks.multi import MultiConfig, label  # noqa: E402
 from simgreeks.reference import FDGrid, bs_option, put_fd_greeks  # noqa: E402
 
 G = ["price", "delta", "gamma", "theta", "vega", "volga", "vanna", "rho", "phi"]
-CONFIGS = {"fixed": MultiConfig(), "sd": MultiConfig(c0_S_rule="sd")}
+CONFIGS = {"fixed": MultiConfig(c0_S_rule="fixed"), "sd": MultiConfig(c0_S_rule="sd")}
 OUT = ROOT / "results" / "diagnostics" / "pilot_width"
 
 
@@ -74,7 +74,7 @@ def summarise(df, ref, reps):
     df = df[~df.ex_region]
     lines = ["# Pilot width of S scaled to the option (c0_S_rule=\"sd\") against the fixed width", "",
              "Not part of the paper. `experiments/diagnostics/pilot_width_check.py`, "
-             f"{reps} paired labels per option (same seed for both). fixed = MultiConfig(); "
+             f"{reps} paired labels per option (same seed for both). fixed = MultiConfig(c0_S_rule=\"fixed\"); "
              "sd = MultiConfig(c0_S_rule=\"sd\"): alpha0_S = min(0.25, 1.25 sigma sqrt(T)) S0. "
              "Per part and sigma sqrt(T) bin: bias = mean over options of the signed relative "
              "error of the option's mean label (t), typical error = mean |relative error| of "

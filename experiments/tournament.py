@@ -184,7 +184,7 @@ def spec_of(row) -> PutSpec:
                    r=float(row["r"]), d=float(row["d"]), T=float(row["T"]), **extra)
 
 
-D2 = dict(groups=GROUPS, run_paths=(), rd_greeks="runs")
+D2 = dict(groups=GROUPS, run_paths=(), rd_greeks="runs", c0_S_rule="fixed")
 
 
 def config_of(variant: str) -> MultiConfig:
