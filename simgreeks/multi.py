@@ -236,7 +236,9 @@ class MultiConfig:
     rd_greeks: str = "pathwise"    # Rho, Phi, dDelta/dr, dDelta/dd: "pathwise" on the runs that do not
     #                                disperse r or d, or "runs" (from runs that do, e.g. GROUPS)
     pathwise_bound: bool = True    # pathwise: exercise only where the payoff >= the European value
-    exercise_bound: bool = False   # the same for the label's own exercise decisions (price, Delta, ...)
+    exercise_bound: bool = True    # the same for the label's own exercise decisions (price, Delta, ...);
+    #                                results/diagnostics/exercise_bound: price bias -0.034 % -> 0.002 %
+    #                                where r < d, and less noise in every S and sigma Greek
     theta_greeks: str = "pathwise"  # Theta and Charm: "pathwise" (pathwise_labels; theta_pde is kept
     #                                 as a column) or "pde" (Theta from the PDE identity, no Charm)
     rd_floor: bool = False         # one-sided r, d spread [max(0, x0 - alpha), x0 + alpha] when x0 >= 0
@@ -1049,6 +1051,7 @@ def design_config(design: str, exercise_rule: str = "pilot", budget: int = 400_0
     kw.setdefault("rd_greeks", "runs")
     kw.setdefault("c0_S_rule", "fixed")
     kw.setdefault("theta_greeks", "pde")
+    kw.setdefault("exercise_bound", False)
     if design in ("D3", "D4"):          # joint runs: order 3 in sigma, 2 in r and d
         kw.setdefault("t0_max_order", (("sigma", 3), ("r", 2), ("d", 2)))
     kw.setdefault("label_source", "oos")   # the tournament's labels

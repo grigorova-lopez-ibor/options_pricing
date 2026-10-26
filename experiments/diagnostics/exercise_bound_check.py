@@ -4,6 +4,9 @@ paper.
 
     python experiments/diagnostics/exercise_bound_check.py [n_options]   (400: ~25 min on 4 cores)
 
+(Run before exercise_bound became the default; the stored labels were made with
+exercise_bound=False.)
+
 The 1000-label check (results/labels_1000_new) found the price -0.03 % (t -6)
 and Delta +0.09 % (t +3) off, mostly where r < d: there early exercise is worth
 (almost) nothing, but the fitted rule exercises some paths below the European
