@@ -1,7 +1,9 @@
 """Labels at low volatility and short maturity (the sigma tail 1-5 % of the new
 ranges, T from 2 months). Not part of the paper.
 
-    python experiments/diagnostics/low_vol_corner_check.py [reps]   (6 reps: ~30 min on 4 cores)
+    python experiments/diagnostics/low_vol_corner_check.py [reps] [NAME=VALUE ...]
+    (6 reps: ~30 min on 4 cores; NAME=VALUE: MultiConfig fields, output files
+    get the suffix _NAME-VALUE...)
 
 Options: sigma in {1, 2, 3, 5 %} x T in {2, 3, 6 months} x (r, d) in
 {(3 %, 1 %), (1 %, 3 %)} x S0/K in {exp(-sd), 1, exp(sd)} (sd = sigma sqrt(T),
@@ -30,7 +32,7 @@ import pandas as pd  # noqa: E402
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from simgreeks.core import PutSpec  # noqa: E402
-from simgreeks.multi import MultiConfig, label  # noqa: E402
+from simgreeks.multi import config_from, label  # noqa: E402
 from simgreeks.reference import FDGrid, bs_option, put_fd_greeks  # noqa: E402
 
 G = ["price", "delta", "gamma", "theta", "vega", "rho", "phi"]
@@ -73,18 +75,22 @@ def reference(i_opt):
                 **{f"ref_{g}": v for g, v in ref.items()})
 
 
+SETTINGS = tuple(sys.argv[2:])
+
+
 def one(job):
     i, spec, rep = job
     t0 = time.time()
-    lab = label(spec, MultiConfig(), np.random.SeedSequence([4245, i, rep]))
+    lab = label(spec, config_from(SETTINGS), np.random.SeedSequence([4245, i, rep]))
     return dict(option=i, rep=rep, seconds=time.time() - t0, ex_region=bool(lab["ex_region"]),
                 european_region=bool(lab["european_region"]), **{g: lab[g] for g in G})
 
 
 def summarise(df, opts, reps):
     lines = ["# Labels at low volatility and short maturity", "",
-             "Not part of the paper. `experiments/diagnostics/low_vol_corner_check.py`, default "
-             f"MultiConfig(), {reps} labels per option, S0 = 100. Reference: Bermudan PDE on a "
+             "Not part of the paper. `experiments/diagnostics/low_vol_corner_check.py`, "
+             f"MultiConfig({', '.join(SETTINGS)}), {reps} labels per option, S0 = 100. "
+             "Reference: Bermudan PDE on a "
              "refined grid with bumps sigma/10 and min(0.002, r/2); ref check = largest relative "
              "error (%) of the European PDE against the closed form on the same grid. Cells: "
              "mean label error, % of |reference| (± se), and (noise of one label, %). "
@@ -136,7 +142,8 @@ if __name__ == "__main__":
             if (k + 1) % max(1, len(jobs) // 10) == 0:
                 print(f"{k + 1}/{len(jobs)} labels, {time.time() - t0:.0f} s", flush=True)
     df = pd.DataFrame(rows).merge(ref, on="option")
-    df.to_csv(OUT / "raw.csv", index=False)
+    tag = "".join(f"_{x.replace('=', '-')}" for x in SETTINGS)
+    df.to_csv(OUT / f"raw{tag}.csv", index=False)
     text = summarise(df, opts, reps)
-    (OUT / "summary.md").write_text(text)
+    (OUT / f"summary{tag}.md").write_text(text)
     print(text)

@@ -192,7 +192,10 @@ class MultiConfig:
     # widths of the dispersion
     widths: str = "selector"       # "selector" (pilot chooses `select`) or "fixed"
     select: tuple = ("S", "sigma")  # coordinates whose width the selector chooses
-    c0_S: float = 0.25             # pilot alpha0_S = c0_S S0
+    c0_S: float = 0.25             # pilot alpha0_S = c0_S S0 (c0_S_rule="fixed")
+    c0_S_rule: str = "fixed"       # "sd": alpha0_S = min(c0_S, c0_S_sd sigma sqrt(T)) S0, the pilot
+    #                                scaled to the curved part of the price (low sigma sqrt(T))
+    c0_S_sd: float = 1.25          # "sd": 1.25 sigma sqrt(T) = 0.25 at sigma = 20 %, T = 1
     c0_sigma: float = 0.6          # pilot alpha0_sigma = c0_sigma sigma
     alpha0_r: float = 0.05         # pilot alpha0_r (when "r" in select)
     alpha0_d: float = 0.05         # pilot alpha0_d (when "d" in select)
@@ -255,6 +258,8 @@ class MultiConfig:
             if len(entry) != 3 or not entry[1] > 0 or not entry[2] > 0:
                 raise ValueError("run_paths entries must be (group, main factor > 0, "
                                  f"pilot factor > 0), got {entry!r}")
+        if self.c0_S_rule not in ("fixed", "sd"):
+            raise ValueError(f"unknown c0_S_rule {self.c0_S_rule!r}")
         if self.rd_greeks not in RD_GREEKS:
             raise ValueError(f"unknown rd_greeks {self.rd_greeks!r}")
         if self.rd_greeks == "pathwise" and any({"r", "d"} & set(g) for g in self.groups):
@@ -313,7 +318,13 @@ def _selected(cfg: MultiConfig, dims) -> list:
 def pilot_widths(spec: PutSpec, cfg: MultiConfig, dims) -> dict:
     """Pilot widths: alpha0 for the selected coordinates, the fixed widths
     otherwise (parameters widened by pilot_widen; S diffuses and is not)."""
-    a0 = {"S": cfg.c0_S * spec.S0, "sigma": cfg.c0_sigma * spec.sigma,
+    c0 = cfg.c0_S
+    if cfg.c0_S_rule == "sd":
+        # results/diagnostics/low_vol_corner: at sigma = 1 %, T = 2 months the price
+        # curves over S0 sigma sqrt(T) = 0.004 S0; from a 0.25 S0 pilot the selector
+        # stops at alpha_S ~ 0.025 S0 and the regression smooths the kink
+        c0 = min(c0, cfg.c0_S_sd * spec.sigma * np.sqrt(spec.T))
+    a0 = {"S": c0 * spec.S0, "sigma": cfg.c0_sigma * spec.sigma,
           "r": cfg.alpha0_r, "d": cfg.alpha0_d}
     out = {}
     for k, a in fixed_widths(spec, cfg, dims).items():
