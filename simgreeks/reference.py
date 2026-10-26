@@ -214,7 +214,8 @@ def put_fd_greeks(spec: PutSpec, style: str = "bermudan", grid: FDGrid | None = 
 
 
 def bs_put(spec: PutSpec) -> dict:
-    """Closed-form Black-Scholes-Merton Greeks of the European put (Theta = dV/dt)."""
+    """Closed-form Black-Scholes-Merton Greeks of the European put (Theta = dV/dt,
+    Charm = dDelta/dt)."""
     S, K, T, s, r, d = spec.S0, spec.K, spec.T, spec.sigma, spec.r, spec.d
     sq = np.sqrt(T)
     d1 = (np.log(S / K) + (r - d + 0.5 * s * s) * T) / (s * sq)
@@ -228,11 +229,14 @@ def bs_put(spec: PutSpec) -> dict:
                 vega=vega, volga=vega * d1 * d2 / s,
                 rho=-K * T * er * norm.cdf(-d2), phi=S * T * ed * norm.cdf(-d1),
                 vanna=-ed * pdf * d2 / s, vera=-vega * d1 * sq / s, delta_r=ed * pdf * sq / s,
-                delta_d=T * ed * norm.cdf(-d1) - ed * pdf * sq / s)
+                delta_d=T * ed * norm.cdf(-d1) - ed * pdf * sq / s,
+                charm=(-d * ed * norm.cdf(-d1)
+                       - ed * pdf * (2 * (r - d) * T - d2 * s * sq) / (2 * T * s * sq)))
 
 
 def bs_call(spec: PutSpec) -> dict:
-    """Closed-form Black-Scholes-Merton Greeks of the European call (Theta = dV/dt)."""
+    """Closed-form Black-Scholes-Merton Greeks of the European call (Theta = dV/dt,
+    Charm = dDelta/dt)."""
     S, K, T, s, r, d = spec.S0, spec.K, spec.T, spec.sigma, spec.r, spec.d
     sq = np.sqrt(T)
     d1 = (np.log(S / K) + (r - d + 0.5 * s * s) * T) / (s * sq)
@@ -246,7 +250,9 @@ def bs_call(spec: PutSpec) -> dict:
                 vega=vega, volga=vega * d1 * d2 / s,
                 rho=K * T * er * norm.cdf(d2), phi=-S * T * ed * norm.cdf(d1),
                 vanna=-ed * pdf * d2 / s, vera=-vega * d1 * sq / s, delta_r=ed * pdf * sq / s,
-                delta_d=-T * ed * norm.cdf(d1) - ed * pdf * sq / s)
+                delta_d=-T * ed * norm.cdf(d1) - ed * pdf * sq / s,
+                charm=(d * ed * norm.cdf(d1)
+                       - ed * pdf * (2 * (r - d) * T - d2 * s * sq) / (2 * T * s * sq)))
 
 
 def bs_option(spec: PutSpec) -> dict:

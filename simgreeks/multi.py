@@ -85,11 +85,22 @@ for Rho and Phi against 7-40 % with (S, r) and (S, d) runs, no bias at small
 r0 and d0 where the runs' windows were 2-8 % off. rd_greeks="runs" with
 groups=GROUPS gives the earlier design.
 
+Theta and Charm (theta_greeks="pathwise", default). Time enters a path through
+its drift and, by Brownian scaling, through W, so Theta is a pathwise
+derivative too (maturity stretched with the number of exercise dates fixed,
+see pathwise_labels), and Charm = dDelta/dt = dTheta/dS is the S-slope of its
+regression. Checks (results/diagnostics/theta_pathwise/): noise of one label
+0.1-1 % for Theta against 8-23 % from the PDE identity, which carries the
+noise of Gamma; Charm 15-19 % (the PDE identity with Speed: 700-1000 %). The
+fixed number of dates makes it differ from the calendar Theta by 0.3-2.7 % at
+50 dates a year, proportional to the spacing. theta_pde, the PDE-identity
+Theta (core.theta_pde), is kept as a column; theta_greeks="pde" uses it as
+Theta and gives no Charm (the earlier labels).
+
 Price, Delta and Gamma come from the run in S alone when the design has one
 (DESIGNS D1, D3), else they are averaged over the runs, weighted by each run's
 main paths (MultiConfig.run_paths gives the sigma run more); each parameter Greek
-comes from the run(s) that disperse its parameters; Theta follows from the PDE identity
-(core.theta_pde). With american_t0=True (default), an option whose continuation
+comes from the run(s) that disperse its parameters. With american_t0=True (default), an option whose continuation
 value is at or below its exercise value at S0 is exercised at t_0: price K - S0
 and Delta -1 (put) or S0 - K and +1 (call), all other Greeks 0.
 
@@ -181,7 +192,8 @@ DESIGNS = {
     "D3": (("S",), ("S", "sigma", "r"), ("S", "d")),              # partly joint
     "D4": (("S", "sigma", "r", "d"),),                            # fully joint
 }
-OUTPUTS = tuple(GREEKS) + ("theta",)
+OUTPUTS = tuple(GREEKS) + ("theta", "theta_pde", "charm")
+THETA_GREEKS = ("pathwise", "pde")
 
 
 @dataclass(frozen=True)
@@ -224,6 +236,8 @@ class MultiConfig:
     rd_greeks: str = "pathwise"    # Rho, Phi, dDelta/dr, dDelta/dd: "pathwise" on the runs that do not
     #                                disperse r or d, or "runs" (from runs that do, e.g. GROUPS)
     pathwise_bound: bool = True    # pathwise: exercise only where the payoff >= the European value
+    theta_greeks: str = "pathwise"  # Theta and Charm: "pathwise" (pathwise_labels; theta_pde is kept
+    #                                 as a column) or "pde" (Theta from the PDE identity, no Charm)
     rd_floor: bool = False         # one-sided r, d spread [max(0, x0 - alpha), x0 + alpha] when x0 >= 0
     kink_r: bool = False           # truncated-power basis in r with a knot at r = 0 (see kink_index)
     alpha_r_shrink: bool = True    # fixed alpha_r = min(alpha_r, r0) for r0 > 0, so the window stays in r >= 0
@@ -261,6 +275,8 @@ class MultiConfig:
                                  f"pilot factor > 0), got {entry!r}")
         if self.c0_S_rule not in ("fixed", "sd"):
             raise ValueError(f"unknown c0_S_rule {self.c0_S_rule!r}")
+        if self.theta_greeks not in THETA_GREEKS:
+            raise ValueError(f"unknown theta_greeks {self.theta_greeks!r}")
         if self.rd_greeks not in RD_GREEKS:
             raise ValueError(f"unknown rd_greeks {self.rd_greeks!r}")
         if self.rd_greeks == "pathwise" and any({"r", "d"} & set(g) for g in self.groups):
@@ -575,8 +591,8 @@ def lsm_multi(spec: PutSpec, cfg: MultiConfig, z: dict, W: np.ndarray, scale: di
     """LSM with per-path parameters. Returns (Y_naive, Y_vf, rules), Y_naive and
     Y_vf discounted to t = 0.
 
-    ``pathwise``: a dict, filled with the per-path pathwise derivatives "rho"
-    and "phi" (pathwise_labels) along the exercise rule used here, with
+    ``pathwise``: a dict, filled with the per-path pathwise derivatives "rho",
+    "phi" and "theta" (pathwise_labels) along the exercise rule used here, with
     cfg.pathwise_bound also requiring the payoff >= the European value.
 
     ``scale`` has one width per dispersed coordinate: the parameters enter the
@@ -604,10 +620,10 @@ def lsm_multi(spec: PutSpec, cfg: MultiConfig, z: dict, W: np.ndarray, scale: di
     cash = spec.payoff(S_T)
     euro_payoff = cash.copy()
     if pathwise is not None:          # exercise date and stock price of each path
-        t_ex, S_ex = np.full(N, spec.T), S_T.copy()
+        t_ex, S_ex, W_ex = np.full(N, spec.T), S_T.copy(), W[:, J - 1].copy()
     if J == 1:
         if pathwise is not None:
-            pathwise.update(pathwise_labels(spec, cfg, z, t_ex, S_ex, S_T))
+            pathwise.update(pathwise_labels(spec, cfg, z, t_ex, S_ex, W_ex, S_T, W[:, J - 1]))
         return disc * cash, disc * cash, {}
     Y_vf = None
     fits = {}
@@ -666,45 +682,69 @@ def lsm_multi(spec: PutSpec, cfg: MultiConfig, z: dict, W: np.ndarray, scale: di
                 # with r < d, which costs ~nothing in price but shortens tau
                 e[e] = ex[e] >= european_value(spec, Sj[e], spec.T - j * spec.dt,
                                                z["sigma"][e], z["r"][e], z["d"][e])
-            t_ex[e], S_ex[e] = j * spec.dt, Sj[e]
+            t_ex[e], S_ex[e], W_ex[e] = j * spec.dt, Sj[e], W[e, j - 1]
     if pathwise is not None:
-        pathwise.update(pathwise_labels(spec, cfg, z, t_ex, S_ex, S_T))
+        pathwise.update(pathwise_labels(spec, cfg, z, t_ex, S_ex, W_ex, S_T, W[:, J - 1]))
     if Y_vf is not None:
         Y_vf = disc * Y_vf
     return disc * cash, Y_vf, fits
 
 
-def pathwise_labels(spec: PutSpec, cfg: MultiConfig, z: dict, tau, S_tau, S_T) -> dict:
-    """Per-path pathwise derivatives of the discounted payoff e^{-r tau} (s (S_tau - K))^+
-    (s = +1 call, -1 put) with respect to r and d, the exercise time tau held
-    fixed (envelope theorem: first-order exact for the optimal rule). r and d
-    only enter the drift, dS_tau/dr = tau S_tau = -dS_tau/dd, so
-        rho: s tau K e^{-r tau} 1{in the money},   phi: -s tau S_tau e^{-r tau} 1{in the money}.
-    With cfg.control_variate the same for the European payoff (tau = T) is
+def pathwise_labels(spec: PutSpec, cfg: MultiConfig, z: dict, tau, S_tau, W_tau, S_T,
+                    W_T) -> dict:
+    """Per-path pathwise derivatives of the discounted payoff
+    Y = e^{-r tau} phi(S_tau), phi(S) = (s (S - K))^+ (s = +1 call, -1 put),
+    S_tau = S exp(mu tau + sigma W_tau), mu = r - d - sigma^2 / 2, with the
+    exercise date held fixed (envelope theorem: first-order exact for the
+    optimal rule; in the money: 1 = 1{phi(S_tau) > 0}):
+
+      rho   = dY/dr = s tau K e^{-r tau} 1          (dS_tau/dr = tau S_tau)
+      phi   = dY/dd = -s tau S_tau e^{-r tau} 1      (dS_tau/dd = -tau S_tau)
+      theta = -dY/dT = -(tau / T) e^{-r tau} [-r phi + s 1 S_tau (mu + sigma W_tau / (2 tau))]
+
+    For theta the maturity T is stretched with the number of exercise dates
+    fixed, so tau = (j / J) T, and W_tau = sqrt(tau) Z scales with it (Brownian
+    scaling). That is the Theta of a Bermudan option with a fixed number of
+    exercise dates; it differs from the calendar Theta (dates fixed in calendar
+    time, the PDE reference's) by an amount proportional to the exercise
+    spacing: 0.3-2.7 % at 50 dates a year, 0.1-0.6 % at 252, and both tend to
+    the American Theta (results/diagnostics/theta_pathwise). With
+    cfg.control_variate the same for the European payoff (tau = T) is
     subtracted; its closed-form Greeks are added back (greeks_pathwise)."""
-    s, r = spec.sign, z["r"]
-    itm = spec.payoff(S_tau) > 0
-    out = {"rho": s * tau * spec.K * np.exp(-r * tau) * itm,
-           "phi": -s * tau * S_tau * np.exp(-r * tau) * itm}
+    s, r, sig = spec.sign, z["r"], z["sigma"]
+    mu = r - z["d"] - 0.5 * sig ** 2
+
+    def derivatives(t, St, Wt):
+        phi = spec.payoff(St)
+        itm, disc = phi > 0, np.exp(-r * t)
+        return (s * t * spec.K * disc * itm, -s * t * St * disc * itm,
+                -(t / spec.T) * disc * (-r * phi + s * itm * St * (mu + sig * Wt / (2 * t))))
+    out = dict(zip(("rho", "phi", "theta"), derivatives(tau, S_tau, W_tau)))
     if cfg.control_variate:
-        itm_T, dT = spec.payoff(S_T) > 0, spec.T * np.exp(-r * spec.T)
-        out["rho"] = out["rho"] - s * spec.K * dT * itm_T
-        out["phi"] = out["phi"] + s * S_T * dT * itm_T
+        eu = derivatives(np.full(len(S_T), spec.T), S_T, W_T)
+        out = {k: out[k] - e for k, e in zip(("rho", "phi", "theta"), eu)}
     return out
 
 
 def greeks_pathwise(spec: PutSpec, cfg: MultiConfig, dims, z: dict, Y: np.ndarray,
                     pw: dict, add: dict | None) -> dict:
-    """greeks_multi, plus Rho and Phi at z0 (intercepts) and dDelta/dr, dDelta/dd
-    (S-slopes) from the t = 0 Taylor regression of the per-path pathwise
-    derivatives ``pw``, plus the closed-form European values ``add`` (control
-    variate). One least-squares solve for the three right-hand sides."""
-    fit = taylor_fit(spec, cfg, z, np.column_stack([Y, pw["rho"], pw["phi"]]), dims)
+    """greeks_multi, plus from the t = 0 Taylor regression of the per-path
+    pathwise derivatives ``pw``: Rho, Phi and Theta at z0 (intercepts) and their
+    S-slopes dDelta/dr, dDelta/dd and Charm = dTheta/dS = dDelta/dt, plus the
+    closed-form European values ``add`` (control variate). Rho and Phi with
+    cfg.rd_greeks="pathwise", Theta and Charm with cfg.theta_greeks="pathwise".
+    One least-squares solve for all right-hand sides."""
+    pairs = []
+    if cfg.rd_greeks == "pathwise":
+        pairs += [("rho", "delta_r"), ("phi", "delta_d")]
+    if cfg.theta_greeks == "pathwise":
+        pairs += [("theta", "charm")]
+    fit = taylor_fit(spec, cfg, z, np.column_stack([Y] + [pw[k] for k, _ in pairs]), dims)
     out = greeks_from(replace(fit, coef=fit.coef[:, 0]), add)
-    for col, (name, cross) in enumerate((("rho", "delta_r"), ("phi", "delta_d")), 1):
+    for col, (name, slope) in enumerate(pairs, 1):
         g = greeks_from(replace(fit, coef=fit.coef[:, col]))
         out[name] = g["price"] + (add or {}).get(name, 0.0)
-        out[cross] = g["delta"] + (add or {}).get(cross, 0.0)
+        out[slope] = g["delta"] + (add or {}).get(slope, 0.0)
     return out
 
 
@@ -855,7 +895,8 @@ def run_group(spec: PutSpec, cfg: MultiConfig, dims, seed) -> dict:
     alphas, scale, rules = pilot(spec, cfg, dims, rng)
     z = isd_multi(spec, cfg, alphas, rng)
     W = brownian(spec, cfg.N, rng)
-    pw = {} if cfg.rd_greeks == "pathwise" and not {"r", "d"} & set(dims) else None
+    pw = ({} if "pathwise" in (cfg.rd_greeks, cfg.theta_greeks) and not {"r", "d"} & set(dims)
+          else None)
     _, Y, _ = lsm_multi(spec, cfg, z, W, scale, rules, pathwise=pw)
     add = bs_option(spec) if cfg.control_variate else None
     if pw is not None:
@@ -903,8 +944,9 @@ def _assemble(spec: PutSpec, cfg: MultiConfig, runs) -> dict:
     """Label from the runs' Greeks: price, Delta, Gamma from the run in S alone if
     any, else averaged over the runs weighted by their main paths N (the
     inverse of their variance); the others from the runs that identify them;
-    Theta from the PDE identity; exercise values when exercising at t_0 is
-    optimal."""
+    theta_pde from the PDE identity; Theta and Charm pathwise from the runs
+    that have them (else Theta = theta_pde); exercise values when exercising at
+    t_0 is optimal."""
     out = {}
     s_only = [r for dims, r in zip(cfg.groups, runs) if tuple(dims) == ("S",)]
     for name in GREEKS:                # only the Greeks some group identifies
@@ -913,7 +955,13 @@ def _assemble(spec: PutSpec, cfg: MultiConfig, runs) -> dict:
         if src:
             out[name] = float(np.average([r[name] for r in src],
                                          weights=[r.get("N", 1) for r in src]))
-    out["theta"], out["ex_region"] = theta_pde(spec, out["price"], out["delta"], out["gamma"])
+    out["theta_pde"], out["ex_region"] = theta_pde(spec, out["price"], out["delta"], out["gamma"])
+    out["theta"] = out["theta_pde"]
+    for name in ("theta", "charm"):
+        src = [r for r in runs if name in r]
+        if src:
+            out[name] = float(np.average([r[name] for r in src],
+                                         weights=[r.get("N", 1) for r in src]))
     out["european_region"] = False
     if cfg.american_t0 and cfg.style == "bermudan" and out["ex_region"]:
         # exercising at t_0 is optimal: V = K - S (put) or S - K (call), so only
@@ -968,6 +1016,9 @@ def european_label(spec: PutSpec, cfg: MultiConfig) -> dict:
     """
     eu = bs_option(spec)
     out = {k: float(eu[k]) for k in OUTPUTS if k in eu and k != "vera"}
+    out["theta_pde"] = out["theta"]
+    if cfg.theta_greeks != "pathwise":
+        out.pop("charm")
     out["ex_region"] = False
     out["european_region"] = True
     if _with_ins(cfg):                 # exact: the in-sample and average labels are the same
@@ -990,6 +1041,7 @@ def design_config(design: str, exercise_rule: str = "pilot", budget: int = 400_0
     kw.setdefault("run_paths", ())         # the tournament's even split
     kw.setdefault("rd_greeks", "runs")
     kw.setdefault("c0_S_rule", "fixed")
+    kw.setdefault("theta_greeks", "pde")
     if design in ("D3", "D4"):          # joint runs: order 3 in sigma, 2 in r and d
         kw.setdefault("t0_max_order", (("sigma", 3), ("r", 2), ("d", 2)))
     kw.setdefault("label_source", "oos")   # the tournament's labels

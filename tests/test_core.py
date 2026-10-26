@@ -479,7 +479,7 @@ def test_multi_hybrid_default_label():
               "delta_r", "delta_d"):
         assert hyb[f"{q}_oos"] == oos[q]
         assert hyb[q] == hyb[f"{q}_oos" if q in HYBRID_OOS else f"{q}_avg"]
-    assert hyb["default_source"] == ("avg: price delta gamma vega rho phi theta; "
+    assert hyb["default_source"] == ("avg: price delta gamma vega rho phi theta theta_pde charm; "
                                      "oos: volga vanna delta_r delta_d")
     assert label(spec, MultiConfig(N=20_000, label_source="avg"), np.random.SeedSequence(11))[
         "volga"] == hyb["volga_avg"]
@@ -590,8 +590,9 @@ def test_multi_pathwise_labels():
             S = spec.S0 * np.exp((r - d) * tau + x)
             return np.exp(-r * tau) * spec.payoff(S), S
         _, S = value(spec.r, spec.d)
-        z = {"r": np.full(50, spec.r)}
-        pw = pathwise_labels(spec, MultiConfig(control_variate=False), z, tau, S, S)
+        z = {"r": np.full(50, spec.r), "d": np.full(50, spec.d), "sigma": np.full(50, spec.sigma)}
+        W = np.zeros(50)
+        pw = pathwise_labels(spec, MultiConfig(control_variate=False), z, tau, S, W, S, W)
         h = 1e-7
         fd_r = (value(spec.r + h, spec.d)[0] - value(spec.r - h, spec.d)[0]) / (2 * h)
         fd_d = (value(spec.r, spec.d + h)[0] - value(spec.r, spec.d - h)[0]) / (2 * h)
@@ -611,3 +612,39 @@ def test_multi_pathwise_config():
         MultiConfig(groups=GROUPS)                     # r, d runs need rd_greeks="runs"
     assert MultiConfig().groups == (("S", "sigma"),)
     MultiConfig(groups=GROUPS, rd_greeks="runs")
+
+
+def test_multi_pathwise_theta():
+    from dataclasses import replace
+    from simgreeks.multi import MultiConfig, label, pathwise_labels
+    from simgreeks.reference import bs_call, bs_put
+    # per-path formula: finite difference in T of e^{-r tau} payoff(S_tau), tau = f T,
+    # W_tau = sqrt(tau) Z (exercise date index fixed)
+    rng = np.random.default_rng(1)
+    for kind in ("put", "call"):
+        spec = PutSpec(K=40, r=0.03, d=0.01, sigma=0.25, kind=kind)
+        f, Z = rng.choice([0.25, 0.5, 1.0], 50), rng.normal(size=50)
+        def value(T):
+            tau = f * T
+            S = spec.S0 * np.exp((spec.r - spec.d - spec.sigma ** 2 / 2) * tau
+                                 + spec.sigma * np.sqrt(tau) * Z)
+            return np.exp(-spec.r * tau) * spec.payoff(S), S, np.sqrt(tau) * Z, tau
+        _, S, W, tau = value(spec.T)
+        z = {"r": np.full(50, spec.r), "d": np.full(50, spec.d), "sigma": np.full(50, spec.sigma)}
+        pw = pathwise_labels(spec, MultiConfig(control_variate=False), z, tau, S, W, S, W)
+        h = 1e-7
+        fd = -(value(spec.T + h)[0] - value(spec.T - h)[0]) / (2 * h)
+        assert np.allclose(pw["theta"], fd, atol=1e-5), kind
+    # European style: Theta and Charm are the closed form exactly; theta_pde is kept
+    for kind, bs in (("put", bs_put), ("call", bs_call)):
+        spec = PutSpec(K=42, sigma=0.3, T=0.5, d=0.02, kind=kind)
+        out = label(spec, MultiConfig(N=20_000, style="european"), 1)
+        for k in ("theta", "charm"):
+            assert np.isclose(out[k], bs(spec)[k], rtol=1e-6, atol=1e-8), (kind, k)
+        assert "theta_pde" in out
+    # the PDE-identity Theta as before
+    spec = PutSpec(K=40, T=0.5)
+    pde = label(spec, MultiConfig(N=20_000, theta_greeks="pde"), 3)
+    assert pde["theta"] == pde["theta_pde"] and "charm" not in pde
+    pw = label(spec, MultiConfig(N=20_000), 3)
+    assert pw["theta"] != pw["theta_pde"] and np.isfinite(pw["charm"])

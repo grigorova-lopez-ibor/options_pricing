@@ -22,10 +22,14 @@ At T = 2 months a label has round(50 / 6) = 8 exercise dates.
                                           [--exact] [--out PATH]
 
 Writes one CSV row per option: the inputs, the label (price, delta, gamma,
-theta, vega, volga, vanna, rho, phi, delta_r, delta_d, ex_region, alpha_S,
-alpha_sigma) and, with --exact, the reference values as exact_<greek>
+theta, charm, vega, volga, vanna, rho, phi, delta_r, delta_d, theta_pde,
+ex_region, alpha_S, alpha_sigma) and, with --exact, the reference values as exact_<greek>
 (reference.put_fd_greeks; where exercising at t_0 is optimal, the exercise
-values K - S0, -1 and 0, as in the labels). The reference values are for
+values K - S0, -1 and 0, as in the labels). theta and charm are pathwise (the
+Theta of a Bermudan option with the number of exercise dates fixed), theta_pde
+the PDE-identity Theta; the reference's Theta and Charm are calendar ones
+(exercise dates fixed in calendar time), which differ from theta and charm by
+0.3-2.7 % and up to ~6 % at 50 dates a year. The reference values are for
 checking the labels (experiments/analyze_labels.py) and add about 25 % to the
 time.
 
@@ -77,8 +81,8 @@ from simgreeks.reference import put_fd_greeks  # noqa: E402
 from simgreeks.runner import job_seed  # noqa: E402
 from simgreeks.sampling import SIGMA_BOUNDS, TAILS, plateau_ppf  # noqa: E402
 
-GREEKS = ["price", "delta", "gamma", "theta", "vega", "volga", "vanna", "rho", "phi",
-          "delta_r", "delta_d"]
+GREEKS = ["price", "delta", "gamma", "theta", "charm", "vega", "volga", "vanna", "rho", "phi",
+          "delta_r", "delta_d", "theta_pde"]
 INPUTS = ["id", "S0", "K", "sigma", "r", "d", "T"]
 EXTRA = ["ex_region", "alpha_S", "alpha_sigma"]
 # (low, high, rounding step) of each input drawn uniformly; "moneyness" is S0/K.
@@ -110,7 +114,8 @@ def spec_of(row) -> PutSpec:
 
 
 def exact(spec: PutSpec) -> dict:
-    f = put_fd_greeks(spec)
+    f = dict(put_fd_greeks(spec))
+    f["theta_pde"] = f["theta"]          # the reference has one (calendar) Theta
     out = {g: f[g] for g in GREEKS}
     if f["ex_region"]:                  # exercise at t_0, as the labels do
         out = {g: 0.0 for g in GREEKS}
