@@ -29,6 +29,7 @@ GREEKS = ["price", "delta", "gamma", "theta", "charm", "vega", "volga", "vanna",
           "delta_r", "delta_d", "theta_pde"]
 REF_OF = {"theta_pde": "theta"}             # theta_pde is compared with the reference Theta
 MODES = ("oos", "ins", "avg")
+REF_TOL = 1e-4                              # relative accuracy allowed for the PDE reference in t
 REFS = {"American": "", "Bermudan 504/yr": "berm_"}
 SETS = {"check": "35 put check options", "random": f"{TPD_RANDOM_N} options from the input ranges"}
 
@@ -54,7 +55,11 @@ def per_option(lab: pd.DataFrame, ref: pd.DataFrame, col_of=lambda q: q) -> pd.D
                 sd = 0.0
             se = sd / np.sqrt(len(x))
             b = m - r
-            t = b / se if se > 0 else (0.0 if abs(b) <= tol else np.sign(b) * np.inf)
+            # the PDE reference is accurate to about REF_TOL relative: with labels
+            # that are (nearly) deterministic (no early exercise in practice) a
+            # difference of that size is not a bias
+            se_t = np.hypot(se, REF_TOL * abs(r))
+            t = b / se_t if se_t > 0 else (0.0 if abs(b) <= tol else np.sign(b) * np.inf)
             rows.append(dict(id=i, greek=q, n=len(x), ref=r, mean=m, bias=b, se=se, t=t, sd=sd))
     df = pd.DataFrame(rows)
     big = df.groupby("greek").ref.transform(lambda s: s.abs().max())
@@ -127,7 +132,8 @@ def main():
     w("")
 
     w("## Summary per Greek (default label)\n")
-    w("Per option: bias = mean of 100 labels − reference, t = bias / se. Cells: options with t > 3 / t < −3 · "
+    w("Per option: bias = mean of 100 labels − reference, t = bias / √(se² + (10⁻⁴ ref)²) (the second term "
+      "allows for the PDE's own error where a label is nearly deterministic). Cells: options with t > 3 / t < −3 · "
       "median signed relative bias · mean t · scaled bias Σ bias / Σ |ref| (t) · MAE of the relative bias "
       "(noise-corrected RMS bias, √mean(b² − se²)) · median noise of one label. Relative measures over the "
       "options with |ref| ≥ 1 % of the largest and a non-exact label.\n")
