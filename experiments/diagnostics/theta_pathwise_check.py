@@ -52,7 +52,7 @@ from simgreeks.reference import FDGrid, bs_option, put_fd_greeks  # noqa: E402
 
 OUT = ROOT / "results" / "diagnostics" / "theta_pathwise"
 DIMS = ("S", "sigma")
-METHODS = ["pde", "pw_oos", "pw_ins", "pw_avg"]
+METHODS = ["pde", "pw_oos", "pw_ins", "pw_avg", "cal_oos", "cal_ins", "cal_avg"]
 
 
 def european_charm_speed(spec):
@@ -64,8 +64,12 @@ def european_charm_speed(spec):
     return charm, speed
 
 
-def theta_paths(spec, cfg, z, W, scale, rules):
-    """Per-path pathwise Theta, less the European one (control variate)."""
+def theta_paths(spec, cfg, z, W, scale, rules, calendar=False):
+    """Per-path pathwise Theta, less the European one (control variate).
+    calendar=False: maturity T stretched with the number of exercise dates fixed
+    (all dates scale); True: today moved with the exercise dates fixed in calendar
+    time, so only the first interval t_0 -> t_1 shrinks:
+        dY/dt = e^{-r tau} [r phi - s 1{in the money} S_tau (mu + sigma W_{t_1} / (2 dt))]."""
     tau, S_tau, _, S_T = exercise_paths(spec, cfg, z, W, scale, rules, euro_bound=True)
     N, J = len(tau), spec.J
     j = np.rint(tau / spec.dt).astype(int)
@@ -73,15 +77,23 @@ def theta_paths(spec, cfg, z, W, scale, rules):
     r, sig, s = z["r"], z["sigma"], spec.sign
     mu = r - z["d"] - 0.5 * sig ** 2
 
+    if calendar:
+        W_1 = W[:, 0]
+
+        def dYdt(t, St):
+            phi = spec.payoff(St)
+            return np.exp(-r * t) * (r * phi - s * (phi > 0) * St * (mu + sig * W_1 / (2 * spec.dt)))
+        return dYdt(tau, S_tau) - dYdt(np.full(N, spec.T), S_T)
+
     def dYdT(t, St, Wt):
         phi = spec.payoff(St)
         return (t / spec.T) * np.exp(-r * t) * (-r * phi + s * (phi > 0) * St * (mu + sig * Wt / (2 * t)))
     return -(dYdT(tau, S_tau, W_tau) - dYdT(np.full(N, spec.T), S_T, W_T))
 
 
-def run_fits(spec, cfg, z, Y, y_theta, eu, charm_eu, speed_eu):
-    """PDE-identity and pathwise Theta and Charm from one regression."""
-    fit = m.taylor_fit(spec, cfg, z, np.column_stack([Y, y_theta]), DIMS)
+def run_fits(spec, cfg, z, Y, y_theta, y_cal, eu, charm_eu, speed_eu):
+    """PDE-identity and pathwise Theta and Charm (both variants) from one regression."""
+    fit = m.taylor_fit(spec, cfg, z, np.column_stack([Y, y_theta, y_cal]), DIMS)
     g = m.greeks_from(replace(fit, coef=fit.coef[:, 0]), eu)
     k = fit.terms.index((3, (0,)))
     speed = fit.coef[k, 0] * factorial(3) / fit.h["S"] ** 3 + speed_eu
@@ -89,8 +101,10 @@ def run_fits(spec, cfg, z, Y, y_theta, eu, charm_eu, speed_eu):
     th_pde = theta_pde(spec, g["price"], g["delta"], g["gamma"])[0]
     ch_pde = d * g["delta"] - (r - d) * S * g["gamma"] - sig ** 2 * S * g["gamma"] - 0.5 * sig ** 2 * S ** 2 * speed
     p = m.greeks_from(replace(fit, coef=fit.coef[:, 1]))
+    c = m.greeks_from(replace(fit, coef=fit.coef[:, 2]))
     return dict(price=g["price"], delta=g["delta"], gamma=g["gamma"], theta_pde=th_pde,
-                charm_pde=ch_pde, theta_pw=p["price"] + eu["theta"], charm_pw=p["delta"] + charm_eu)
+                charm_pde=ch_pde, theta_pw=p["price"] + eu["theta"], charm_pw=p["delta"] + charm_eu,
+                theta_cal=c["price"] + eu["theta"], charm_cal=c["delta"] + charm_eu)
 
 
 def one(job):
@@ -105,13 +119,16 @@ def one(job):
     charm_eu, speed_eu = european_charm_speed(spec)
     _, Y, _ = m.lsm_multi(spec, sc, z, W, scale, rules)
     _, Y_ins, fits_ins = m.lsm_multi(spec, sc, z, W, alphas, None)
-    oos = run_fits(spec, sc, z, Y, theta_paths(spec, sc, z, W, scale, rules), eu, charm_eu, speed_eu)
-    ins = run_fits(spec, sc, z, Y_ins, theta_paths(spec, sc, z, W, alphas, fits_ins), eu, charm_eu,
-                   speed_eu)
+    oos = run_fits(spec, sc, z, Y, theta_paths(spec, sc, z, W, scale, rules),
+                   theta_paths(spec, sc, z, W, scale, rules, True), eu, charm_eu, speed_eu)
+    ins = run_fits(spec, sc, z, Y_ins, theta_paths(spec, sc, z, W, alphas, fits_ins),
+                   theta_paths(spec, sc, z, W, alphas, fits_ins, True), eu, charm_eu, speed_eu)
     avg = {k: 0.5 * (oos[k] + ins[k]) for k in oos}
     ex = theta_pde(spec, avg["price"], avg["delta"], avg["gamma"])[1]
     vals = {"pde": (avg["theta_pde"], avg["charm_pde"]), "pw_oos": (oos["theta_pw"], oos["charm_pw"]),
-            "pw_ins": (ins["theta_pw"], ins["charm_pw"]), "pw_avg": (avg["theta_pw"], avg["charm_pw"])}
+            "pw_ins": (ins["theta_pw"], ins["charm_pw"]), "pw_avg": (avg["theta_pw"], avg["charm_pw"]),
+            "cal_oos": (oos["theta_cal"], oos["charm_cal"]), "cal_ins": (ins["theta_cal"], ins["charm_cal"]),
+            "cal_avg": (avg["theta_cal"], avg["charm_cal"])}
     return [dict(part=part, option=i, rep=rep, method=k, ex_region=ex,
                  theta=0.0 if ex else v[0], charm=0.0 if ex else v[1]) for k, v in vals.items()]
 
@@ -137,8 +154,10 @@ def summarise(df, ref, reps):
              "Not part of the paper. `experiments/diagnostics/theta_pathwise_check.py`, "
              f"{reps} labels per option (the default label's (S, sigma) run, 300k main paths). "
              "pde = the label's Theta (PDE identity) and Charm from the identity with Speed; "
-             "pw_* = pathwise with the out-of-sample rule, the in-sample rule and their average "
-             "(the label averages them). Bias = mean over options of the signed relative error "
+             "pw_* = pathwise, maturity stretched with the number of exercise dates fixed; "
+             "cal_* = pathwise, exercise dates fixed in calendar time (only t_0 -> t_1 shrinks), "
+             "as the reference; each with the out-of-sample rule, the in-sample rule and their "
+             "average (the label averages them). Bias = mean over options of the signed relative error "
              "of the option's mean label (t); typical / median error = mean / median |relative "
              "error| of one label; options with |ref| < 1 % of the largest |ref| in the part, "
              "and the exercise region, left out.", ""]
@@ -154,15 +173,16 @@ def summarise(df, ref, reps):
                 b, se = per.mean(), per.std() / np.sqrt(len(per))
                 lines.append(f"| {g} | {meth} | {b:+.2f} ({b / se:+.1f}) | {e.abs().mean():.1f} | "
                              f"{e.abs().median():.1f} |")
-        lines += ["", "Per option (pw_avg and pde; bias % ± se, noise of one label %):", "",
-                  "| option | sigma sqrt(T) | ref theta | theta pde | theta pw_avg | ref charm | charm pde | charm pw_avg |",
-                  "|---|---|---|---|---|---|---|---|"]
+        lines += ["", "Per option (pde, pw_avg, cal_avg; bias % ± se, noise of one label %):", "",
+                  "| option | sigma sqrt(T) | ref theta | theta pde | theta pw_avg | theta cal_avg "
+                  "| ref charm | charm pde | charm pw_avg | charm cal_avg |",
+                  "|---|---|---|---|---|---|---|---|---|---|"]
         for i, d in d0.groupby("option"):
             cells = []
             for g in ("theta", "charm"):
                 rf = d[f"ref_{g}"].iloc[0]
                 cells.append(f"{rf:+.4f}")
-                for meth in ("pde", "pw_avg"):
+                for meth in ("pde", "pw_avg", "cal_avg"):
                     e = 100 * (d[d.method == meth][g] - rf) / abs(rf) if rf else d[d.method == meth][g] * np.nan
                     cells.append(f"{e.mean():+.1f} ± {e.std() / np.sqrt(len(e)):.1f} ({e.std():.1f})")
             lines.append(f"| {i} | {d.sd.iloc[0]:.3f} | " + " | ".join(cells) + " |")
