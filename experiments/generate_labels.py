@@ -18,7 +18,7 @@ with (S0, K), so S0 only sets the units.
 At T = 2 months a label has round(50 / 6) = 8 exercise dates.
 
     python experiments/generate_labels.py [--n 100] [--S0 100] [--workers N]
-                                          [--seed 1] [--sigma-tail cosine]
+                                          [--seed 1] [--sigma-tail concave]
                                           [--exact] [--out PATH]
 
 Writes one CSV row per option: the inputs, the label (price, delta, gamma,
@@ -92,7 +92,7 @@ RANGES = {"moneyness": (0.8, 1.2, None), "r": (0.0, 0.05, 0.0025),
 SIGMA_STEP = 0.0001
 
 
-def sample_options(n: int, S0: float, seed: int, sigma_tail: str = "cosine") -> pd.DataFrame:
+def sample_options(n: int, S0: float, seed: int, sigma_tail: str = "concave") -> pd.DataFrame:
     with warnings.catch_warnings():           # n need not be a power of 2 here
         warnings.simplefilter("ignore", UserWarning)
         U = qmc.Sobol(d=len(RANGES) + 1, scramble=True, seed=seed).random(n)
@@ -146,7 +146,7 @@ def main():
     ap.add_argument("--n", type=int, default=100)
     ap.add_argument("--S0", type=float, default=100.0)
     ap.add_argument("--seed", type=int, default=1)
-    ap.add_argument("--sigma-tail", choices=sorted(TAILS), default="cosine",
+    ap.add_argument("--sigma-tail", choices=sorted(TAILS), default="concave",
                     help="shape of the sigma tails (1-5 %% and 50-60 %%; simgreeks.sampling)")
     ap.add_argument("--workers", type=int, default=None)
     ap.add_argument("--exact", action="store_true",

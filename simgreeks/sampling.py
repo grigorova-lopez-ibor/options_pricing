@@ -8,15 +8,18 @@ the network sees labels on both sides of 5 % and 50 %. The density is
 flat on the plateau and g((x - lo) / (a - lo)) times the plateau level in the
 lower tail (and the mirror image in the upper tail), with g(0) = 0, g(1) = 1:
 
-    "cosine"   g(t) = (1 - cos(pi t)) / 2   joins the plateau without a kink (default)
-    "concave"  g(t) = sqrt(1 - (1 - t)^2)   quarter ellipse; most labels near the edges
+    "concave"  g(t) = sqrt(1 - (1 - t)^2)   quarter ellipse (default): stays near the plateau
+                                            level, drops vertically to 0 at lo and hi
+    "cosine"   g(t) = (1 - cos(pi t)) / 2   fades to 0 smoothly at lo and hi
     "linear"   g(t) = t                     trapezoid
     "convex"   g(t) = t^2                   fewest labels just past the edges
 
-What protects the edges is the density just outside 5 % and 50 %, so
-"concave" and "cosine" do it best; "convex" least. Share of the labels in
-the tails with the default bounds (lower 1-5 %, upper 50-60 %): concave 19.6 %,
-cosine and linear 13.5 % (3.8 % below 5 %, 9.6 % above 50 %), convex 9.4 %.
+"concave" and "cosine" both join the plateau without a kink (g'(1) = 0). What
+protects the edges is the density beyond 5 % and 50 %: concave keeps it high
+furthest out (0.87 of the plateau level at 3 % and 55 %, cosine 0.50), at the
+cost of more labels outside [5 %, 50 %]. Share of the labels in the tails with
+the default bounds (lower 1-5 %, upper 50-60 %): concave 19.6 % (5.6 % below
+5 %, 14.0 % above 50 %), cosine and linear 13.5 %, convex 9.4 %.
 
 Draws go through the inverse CDF, so uniform (e.g. Sobol) points keep their
 low discrepancy.
@@ -44,7 +47,7 @@ def _check(bounds, tail):
     return lo, a, b, hi
 
 
-def plateau_pdf(x, bounds=SIGMA_BOUNDS, tail: str = "cosine") -> np.ndarray:
+def plateau_pdf(x, bounds=SIGMA_BOUNDS, tail: str = "concave") -> np.ndarray:
     """Density of the plateau-with-tails distribution at x."""
     lo, a, b, hi = _check(bounds, tail)
     x = np.asarray(x, dtype=float)
@@ -71,7 +74,7 @@ def _mass(bounds, tail) -> float:
     return (b - a) + ((a - lo) + (hi - b)) * _tail_mass(tail)
 
 
-def plateau_ppf(u, bounds=SIGMA_BOUNDS, tail: str = "cosine") -> np.ndarray:
+def plateau_ppf(u, bounds=SIGMA_BOUNDS, tail: str = "concave") -> np.ndarray:
     """Inverse CDF: maps u in [0, 1] to the plateau-with-tails distribution.
     The tails are inverted numerically (linear interpolation of the CDF on a
     fine grid), the plateau exactly."""
@@ -94,7 +97,7 @@ def plateau_ppf(u, bounds=SIGMA_BOUNDS, tail: str = "cosine") -> np.ndarray:
     return x
 
 
-def tail_share(bounds=SIGMA_BOUNDS, tail: str = "cosine") -> float:
+def tail_share(bounds=SIGMA_BOUNDS, tail: str = "concave") -> float:
     """Probability of a draw outside [a, b]."""
     lo, a, b, hi = _check(bounds, tail)
     return 1.0 - (b - a) / _mass(bounds, tail)

@@ -49,7 +49,7 @@ def grid():
 
 
 def sample(n):
-    df = sample_options(4 * n, 100.0, 7)
+    df = sample_options(4 * n, 100.0, 7, "cosine")    # the tail shape the results were made with
     df = df[df.r > 0].head(n)
     return [PutSpec(S0=row.S0, K=row.K, sigma=row.sigma, r=row.r, d=row.d, T=row.T)
             for row in df.itertuples()]
