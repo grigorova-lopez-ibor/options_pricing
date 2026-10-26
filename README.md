@@ -353,6 +353,8 @@ Open issues:
 `MultiConfig()` now encodes these choices; the older results files in `results/`
 were produced with α_r = α_d = 0.02 and no shrinking or European region.
 
+Open (on hold): Rho −0.76 % and Phi +0.72 % where r ≥ d (t ≈ 4, 193 options, `results/diagnostics/exercise_bound/summary.md`), concentrated at T < 0.5 in the 1000-label check (`results/labels_1000_new/report.md`); not changed by the exercise bound. To check first: the reference's r and d bumps and grid at short maturity, then the exercise rule (oos vs ins, a larger pilot).
+
 | Choice | Default | Evidence |
 |---|---|---|
 | α_S, α_σ | Paper's selector (Appendix A.2, M = ν + 1) on the pilot paths | Tables 4–5 reproduced with M = ν + 1 |
