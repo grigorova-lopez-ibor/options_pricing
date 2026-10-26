@@ -77,7 +77,7 @@ from scipy.stats import qmc  # noqa: E402
 
 from simgreeks.core import PutSpec  # noqa: E402
 from simgreeks.multi import MultiConfig, label  # noqa: E402
-from simgreeks.reference import put_fd_greeks  # noqa: E402
+from simgreeks.reference import FDGrid, bs_option, put_fd_greeks  # noqa: E402
 from simgreeks.runner import job_seed  # noqa: E402
 from simgreeks.sampling import SIGMA_BOUNDS, TAILS, plateau_ppf  # noqa: E402
 
@@ -114,10 +114,24 @@ def spec_of(row) -> PutSpec:
 
 
 def exact(spec: PutSpec) -> dict:
-    f = dict(put_fd_greeks(spec))
+    """Reference values. No early exercise optimal (r <= 0 <= d): the closed form,
+    as the labels. Otherwise the Bermudan PDE with central bumps sigma/10 (at
+    most 0.005) and r/2 (at most 0.002, so r stays > 0), on a refined grid where
+    sigma sqrt(T) < 0.1: the default grid and the fixed sigma bump 0.005 are off
+    by up to 1.5 % in price and 1 % in Vega at sigma = 1 %, T = 2 months
+    (experiments/diagnostics/low_vol_corner_check.py)."""
+    if spec.no_early_exercise:
+        f = dict(bs_option(spec))
+    else:
+        sd = spec.sigma * np.sqrt(spec.T)
+        grid = (FDGrid(n_x=8001, half_width=abs(np.log(spec.S0 / spec.K)) + 12 * sd + 0.02)
+                if sd < 0.1 else None)
+        bumps = {"sigma": min(0.005, spec.sigma / 10),
+                 "r": min(0.002, spec.r / 2) if spec.r > 0 else 0.002, "d": 0.002}
+        f = dict(put_fd_greeks(spec, "bermudan", grid, bumps, vera=False))
     f["theta_pde"] = f["theta"]          # the reference has one (calendar) Theta
     out = {g: f[g] for g in GREEKS}
-    if f["ex_region"]:                  # exercise at t_0, as the labels do
+    if f.get("ex_region", False):       # exercise at t_0, as the labels do
         out = {g: 0.0 for g in GREEKS}
         out["price"], out["delta"] = spec.K - spec.S0, -1.0
     return {f"exact_{g}": v for g, v in out.items()}
