@@ -236,6 +236,7 @@ class MultiConfig:
     rd_greeks: str = "pathwise"    # Rho, Phi, dDelta/dr, dDelta/dd: "pathwise" on the runs that do not
     #                                disperse r or d, or "runs" (from runs that do, e.g. GROUPS)
     pathwise_bound: bool = True    # pathwise: exercise only where the payoff >= the European value
+    exercise_bound: bool = False   # the same for the label's own exercise decisions (price, Delta, ...)
     theta_greeks: str = "pathwise"  # Theta and Charm: "pathwise" (pathwise_labels; theta_pde is kept
     #                                 as a column) or "pde" (Theta from the PDE identity, no Charm)
     rd_floor: bool = False         # one-sided r, d spread [max(0, x0 - alpha), x0 + alpha] when x0 >= 0
@@ -644,6 +645,12 @@ def lsm_multi(spec: PutSpec, cfg: MultiConfig, z: dict, W: np.ndarray, scale: di
             if fits[j] is not None and itm.any():
                 exercise[itm] = ex[itm] >= _predict(fits[j], Sj[itm], mono[itm], index,
                                                     cfg.M_tau)
+                if cfg.exercise_bound and exercise.any():
+                    # never exercise below the European value (the American
+                    # continuation value is never below it)
+                    e = exercise
+                    e[e] = ex[e] >= european_value(spec, Sj[e], spec.T - j * spec.dt,
+                                                   z["sigma"][e], z["r"][e], z["d"][e])
         if j < jv and Y_vf is not None:
             # before the value-function date: the label follows the exercise rule
             # (premium e^{-r dt} P_{j+1}, or ex - E_j where the rule exercises)
