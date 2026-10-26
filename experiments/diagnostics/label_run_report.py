@@ -71,7 +71,8 @@ def main():
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
     df = pd.read_csv(args.csv)
-    ref_ex = (df.exact_price == df.K - df.S0) & (df.exact_delta == -1.0)
+    # the CSV keeps 6 significant digits, so compare the exercise value with a tolerance
+    ref_ex = np.isclose(df.exact_price, df.K - df.S0, rtol=1e-5, atol=1e-6) & (df.exact_delta == -1.0)
     both = df.ex_region & ref_ex
     lines = [f"# Label check: {args.csv}", "",
              f"{len(df)} options; {int(both.sum())} in the exercise region for both label and reference "
