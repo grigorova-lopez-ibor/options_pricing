@@ -152,8 +152,10 @@ def put_fd(spec: PutSpec, style: str = "bermudan", grid: FDGrid | None = None) -
     Vxx = (v_p - 2 * v_0 + v_m) / h ** 2
     price = float(v_0)
     theta = float((rec[-1][1] - rec[1][1]) / (2 * k))   # V(t=+k) - V(t=-k)
+    # Charm = dDelta/dt, the same central difference applied to Delta
+    charm = float((rec[-1][2] - rec[-1][0] - rec[1][2] + rec[1][0]) / (2 * h) / spec.S0 / (2 * k))
     return dict(price=price, delta=float(Vx / spec.S0),
-                gamma=float((Vxx - Vx) / spec.S0 ** 2), theta=theta,
+                gamma=float((Vxx - Vx) / spec.S0 ** 2), theta=theta, charm=charm,
                 ex_region=bool(spec.intrinsic >= price))
 
 
