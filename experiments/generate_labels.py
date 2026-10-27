@@ -23,7 +23,11 @@ At T = 2 months a label has round(50 / 6) = 8 exercise dates.
 
 Writes one CSV row per option: the inputs, the label (price, delta, gamma,
 theta, charm, vega, volga, vanna, rho, phi, delta_r, delta_d, theta_pde,
-ex_region, alpha_S, alpha_sigma) and, with --exact, the reference values as exact_<greek>
+ex_region, alpha_S, alpha_sigma), each Greek's three versions <greek>_oos (the
+exercise rule fitted on the pilot paths), <greek>_ins (refitted on the main
+paths) and <greek>_avg (their average), with default_source naming which one
+the plain column is (multi.HYBRID_OOS), so the version to train on can be
+chosen per Greek after the run, and, with --exact, the reference values as exact_<greek>
 (reference.put_fd_greeks; where exercising at t_0 is optimal, the exercise
 values K - S0, -1 and 0, as in the labels). theta and charm are pathwise (the
 Theta of a Bermudan option with the number of exercise dates fixed), theta_pde
@@ -85,6 +89,7 @@ GREEKS = ["price", "delta", "gamma", "theta", "charm", "vega", "volga", "vanna",
           "delta_r", "delta_d", "theta_pde"]
 INPUTS = ["id", "S0", "K", "sigma", "r", "d", "T"]
 EXTRA = ["ex_region", "alpha_S", "alpha_sigma"]
+VERSIONS = [f"{g}_{v}" for g in GREEKS for v in ("oos", "ins", "avg")] + ["default_source"]
 # (low, high, rounding step) of each input drawn uniformly; "moneyness" is S0/K.
 # sigma: SIGMA_BOUNDS (plateau and tails), rounded to SIGMA_STEP
 RANGES = {"moneyness": (0.8, 1.2, None), "r": (0.0, 0.05, 0.0025),
@@ -144,6 +149,7 @@ def one_option(job) -> dict:
     out = dict(row)
     lab = label(spec, MultiConfig(), job_seed(base_seed, {"id": int(row["id"])}, 0))
     out.update({k: lab[k] for k in GREEKS + EXTRA})
+    out.update({k: lab.get(k, np.nan) for k in VERSIONS})
     if with_exact:
         out.update(exact(spec))
     return out
@@ -169,8 +175,9 @@ def main():
     ap.add_argument("--out", type=Path, default=ROOT / "results" / "labels_sample.csv")
     args = ap.parse_args()
 
-    columns = INPUTS + GREEKS + EXTRA + ([f"exact_{g}" for g in GREEKS] if args.exact else [])
-    settings = json.dumps(dict(n=args.n, S0=args.S0, seed=args.seed, exact=args.exact,
+    columns = (INPUTS + GREEKS + EXTRA + VERSIONS
+               + ([f"exact_{g}" for g in GREEKS] if args.exact else []))
+    settings = json.dumps(dict(n=args.n, S0=args.S0, seed=args.seed, exact=args.exact, versions=True,
                                ranges=RANGES, sigma=SIGMA_BOUNDS, sigma_tail=args.sigma_tail),
                           sort_keys=True)
     partial = args.out.with_name(args.out.stem + ".partial.csv")
