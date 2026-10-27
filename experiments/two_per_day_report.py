@@ -158,6 +158,31 @@ def main():
             w(f"| {q} | " + " | ".join([cells(POS[(s, "American")], q)] + [cells(pm[m], q) for m in MODES]) + " |")
         w("")
 
+    w("## MAE of the per-option bias: out-of-sample, in-sample, averaged (vs American)\n")
+    w("Per option: relative bias b = (mean of 100 labels − reference) / |reference|, se its standard error. "
+      "Cells: MAE = mean |b| / noise floor (the MAE expected from the leftover noise alone, √(2/π) × mean se) / "
+      "corrected = √mean(b² − se²), the size of the real per-option bias. % of |reference|; options with "
+      "|reference| ≥ 1 % of the largest and a non-exact label. The default takes avg for price, Δ, Γ, Θ, Charm, "
+      "Vega, Rho, Phi and oos for Volga, Vanna, ∂Δ/∂r, ∂Δ/∂d.\n")
+    for s, (lab, ref, R) in data.items():
+        w(f"### {SETS[s]}\n")
+        w("| Greek | default | oos | ins | avg |")
+        w("|---|---|---|---|---|")
+        cols = {"default": lambda q: q} | {m: (lambda q, m=m: f"{q}_{m}") for m in MODES}
+        pm = {m: per_option(lab, R["American"], f) for m, f in cols.items()}
+        for q in GREEKS:
+            cs = []
+            for m in cols:
+                d = pm[m][pm[m].greek == q]
+                rb, rs = d.rel_bias.dropna(), d.rel_se.dropna()
+                if rb.empty:
+                    cs.append("–")
+                    continue
+                cs.append(f"{100 * rb.abs().mean():.2f} / {100 * np.sqrt(2 / np.pi) * rs.mean():.2f} / "
+                          f"{100 * np.sqrt(max(0.0, (rb ** 2 - rs ** 2).mean())):.2f}")
+            w(f"| {q} | " + " | ".join(cs) + " |")
+        w("")
+
     w("## Bermudan (504/yr) vs American gap per option\n")
     w("Gap = American − Bermudan 504/yr (PDE), relative to |American| in brackets; 'price gap in se' = gap / se "
       "of the mean of 100 labels.\n")
@@ -180,24 +205,31 @@ def main():
               + f" | {ins} |")
         w("")
 
-    w("## Every option and Greek (default label, vs American)\n")
-    w("Cells: reference · bias ± se (t) [relative bias %, relative noise %].\n")
+    w("## Every option and Greek (vs American)\n")
+    w("Cells: relative bias % (t) of the mean of 100 labels for the default, out-of-sample, in-sample and "
+      "averaged labels; noise = relative noise of one default label %.\n")
     for s, (lab, ref, R) in data.items():
-        po = POS[(s, "American")].set_index(["id", "greek"])
+        cols = {"default": lambda q: q} | {m: (lambda q, m=m: f"{q}_{m}") for m in MODES}
+        pm = {m: per_option(lab, R["American"], f).set_index(["id", "greek"]) for m, f in cols.items()}
         opts = ref.drop_duplicates("id").set_index("id")
         w(f"### {SETS[s]}\n")
-        w("| id | T | σ | r | d | K | Greek | American | Bermudan 504 | label: bias ± se (t) [rel %, noise %] |")
-        w("|---|---|---|---|---|---|---|---|---|---|")
+        w("| id | T | σ | r | d | K | Greek | American | Bermudan 504 | default | oos | ins | avg | noise |")
+        w("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
         for i, o in opts.iterrows():
             for q in GREEKS:
-                if (i, q) not in po.index:
+                if (i, q) not in pm["default"].index:
                     continue
-                r = po.loc[(i, q)]
-                rb = f"{100 * r.rel_bias:+.2f}" if np.isfinite(r.rel_bias) else "–"
-                rn = f"{100 * r.rel_noise:.1f}" if np.isfinite(r.rel_noise) else "–"
+                cs = []
+                for m in cols:
+                    r = pm[m].loc[(i, q)] if (i, q) in pm[m].index else None
+                    if r is None or not np.isfinite(r.rel_bias):
+                        cs.append("–" if r is None else f"abs {r.bias:+.1e} ({r.t:+.1f})")
+                    else:
+                        cs.append(f"{100 * r.rel_bias:+.2f} ({r.t:+.1f})")
+                rn = pm["default"].loc[(i, q)].rel_noise
                 w(f"| {i} | {o['T']:g} | {o.sigma:.2%} | {o.r:.2%} | {o.d:.2%} | {o.K:g} | {q} | "
-                  f"{R['American'].loc[i, q]:+.4f} | {R['Bermudan 504/yr'].loc[i, q]:+.4f} | "
-                  f"{r.bias:+.4f} ± {r.se:.4f} ({r.t:+.1f}) [{rb}, {rn}] |")
+                  f"{R['American'].loc[i, q]:+.4f} | {R['Bermudan 504/yr'].loc[i, q]:+.4f} | " + " | ".join(cs)
+                  + (f" | {100 * rn:.1f} |" if np.isfinite(rn) else " | – |"))
         w("")
     (DEST / "report.md").write_text("\n".join(L) + "\n")
     print("\n".join(L[: L.index("## Bermudan (504/yr) vs American gap per option\n")]))
