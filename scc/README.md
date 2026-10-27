@@ -143,3 +143,31 @@ takes about 50 / 95 / 180 s at T = 0.5 / 1 / 2 and peaks at 2.8 GB at T = 2
     bash scc/submit.sh tpd_random 200 03:00:00
     # when qstat -u $USER is empty:
     cd ~/experiments && tar czf tpd_out.tar.gz tpd_out
+
+## A training set (generate_labels.py)
+
+`experiments/generate_labels.py` draws n options from the input ranges (S0/K
+0.8–1.2, σ plateau 5–50 % with concave tails to 1 % and 60 %, r and d 0–5 %, T 2
+months–2 years) and labels each once with the default label at 504 exercise dates
+a year (two a business day; within 0.015 % median, 0.07 % max of the American
+price, `results/diagnostics/exercise_frequency`). Each row has every Greek in three
+versions (`_oos`, `_ins`, `_avg`) and, for ids divisible by `EXACT_EVERY`, the PDE
+reference values (`exact_*`). A label takes about 35 / 76 / 150 s at T = 0.5 / 1 / 2
+(about 100 s on average) and up to 2.8 GB, within mem_per_core=4G; a reference adds
+about 30-60 s. So 25,000 labels with references on 10 % are about 750 CPU hours:
+with 400 tasks, about 2 hours each.
+
+    cd /projectnb/<project>/<user>/options_pricing
+    git pull
+    source ~/venvs/simgreeks/bin/activate
+    export SCC_PROJECT=<project> OUT=/projectnb/<project>/<user>/labels_25k/labels.csv
+    bash scc/submit_labels.sh 25000 400 04:00:00       # SEED=1 SPY=504 EXACT_EVERY=10 by default
+    # when qstat -u $USER is empty:
+    python experiments/generate_labels.py --n 25000 --ntasks 400 --merge --out $OUT
+
+Task i labels the options with id % 400 == i into `labels.task<i>of0400.csv`; a
+killed task is resumed by resubmitting (finished options are skipped). The merge
+stops with a list if any task file or option is missing. The options and the
+labels' seeds depend only on n, SEED and the option's id, so the same n and SEED
+give the same labels with any number of tasks; a later, larger set with the same
+SEED repeats the first n options, so use a new SEED for an independent set.

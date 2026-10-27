@@ -1,0 +1,20 @@
+#!/bin/bash -l
+# SGE job array for experiments/generate_labels.py (a training set). Submit with
+# scc/submit_labels.sh, which sets N, SEED, NTASKS, OUT, SPY, EXACT_EVERY. Task i
+# labels the options with id % NTASKS == i into $OUT.task<i>of<NTASKS>.csv; its
+# output is resumable, so a failed task can simply be resubmitted.
+#$ -cwd
+#$ -j y
+#$ -o logs/
+#$ -pe omp 1
+#$ -l mem_per_core=4G
+set -euo pipefail
+module load python3/3.10.12 2>/dev/null || module load python3
+source "${VENV:-$HOME/venvs/simgreeks}/bin/activate"
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1
+ARGS=(--n "$N" --seed "$SEED" --steps-per-year "$SPY" --task $((SGE_TASK_ID - 1))
+      --ntasks "$NTASKS" --workers 1 --out "$OUT")
+[ "${EXACT_EVERY:-0}" != "0" ] && ARGS+=(--exact --exact-every "$EXACT_EVERY")
+echo "$(date) host $(hostname) task $SGE_TASK_ID: python experiments/generate_labels.py ${ARGS[*]}"
+python experiments/generate_labels.py "${ARGS[@]}"
+echo "$(date) done"

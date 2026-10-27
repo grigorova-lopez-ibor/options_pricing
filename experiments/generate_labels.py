@@ -12,14 +12,31 @@ volatility, rate, dividend yield and maturity at a fixed S0, then rounded:
     T      uniform on [2 months, 2 years], step 0.001
 
 Each label is one call of simgreeks.multi.label with the default MultiConfig
-(one (S, sigma) run of 300,000 main + 100,000 pilot paths; Rho, Phi, dDelta/dr
-and dDelta/dd pathwise on its paths, see multi.RD_GREEKS); labels scale exactly
-with (S0, K), so S0 only sets the units.
-At T = 2 months a label has round(50 / 6) = 8 exercise dates.
+(one (S, sigma) run of 300,000 main + 100,000 pilot paths; Rho, Phi, dDelta/dr,
+dDelta/dd, Theta and Charm pathwise on its paths); labels scale exactly with
+(S0, K), so S0 only sets the units.
+
+Exercise dates. --steps-per-year (default 504, two a business day): the puts are
+Bermudan with J = round(steps_per_year T) dates. At 504 a year they are within
+0.015 % (median, max 0.07 %) of the American price, 0.03-0.06 % (max 0.4 %) in
+Rho and Phi (results/diagnostics/exercise_frequency); 50 a year is the earlier
+setting. Above 50 dates a year the value-function label is taken at the date
+nearest 1/50 year (MultiConfig.vf_time = 0.02, --vf-time), as validated at daily
+dates (results/american_daily) and at 504 (results/two_per_day). A label at 504
+takes about 35 / 76 / 150 s at T = 0.5 / 1 / 2 on one core and up to 2.8 GB.
 
     python experiments/generate_labels.py [--n 100] [--S0 100] [--workers N]
                                           [--seed 1] [--sigma-tail concave]
-                                          [--exact] [--out PATH]
+                                          [--steps-per-year 504] [--vf-time 0.02]
+                                          [--exact] [--exact-every 1] [--out PATH]
+                                          [--task i --ntasks n | --merge --ntasks n]
+
+On the SCC (scc/labels.qsub, scc/submit_labels.sh): --task i --ntasks n labels
+the options with id % n == i into <out stem>.task<i>of<n>.csv (resumable, one
+process: --workers 1); when all tasks are done, the same command with --merge
+instead of --task checks that every option is there and writes the final CSV.
+The options and each label's seed depend only on --n, --seed and the option's
+id, so the result does not depend on the number of tasks.
 
 Writes one CSV row per option: the inputs, the label (price, delta, gamma,
 theta, charm, vega, volga, vanna, rho, phi, delta_r, delta_d, theta_pde,
@@ -29,7 +46,8 @@ paths) and <greek>_avg (their average), with default_source naming which one
 the plain column is (multi.HYBRID_OOS), so the version to train on can be
 chosen per Greek after the run, and, with --exact, the reference values as exact_<greek>
 (reference.put_fd_greeks; where exercising at t_0 is optimal, the exercise
-values K - S0, -1 and 0, as in the labels). theta and charm are pathwise (the
+values K - S0, -1 and 0, as in the labels; --exact-every k: only for the
+options with id % k == 0, e.g. 10 for a 10 % check subset). theta and charm are pathwise (the
 Theta of a Bermudan option with the number of exercise dates fixed), theta_pde
 the PDE-identity Theta; the reference's Theta and Charm are calendar ones
 (exercise dates fixed in calendar time), which differ from theta and charm by
@@ -69,6 +87,7 @@ import json  # noqa: E402
 import sys  # noqa: E402
 import time  # noqa: E402
 import warnings  # noqa: E402
+from dataclasses import replace  # noqa: E402
 from concurrent.futures import ProcessPoolExecutor, as_completed  # noqa: E402
 from pathlib import Path  # noqa: E402
 
@@ -81,14 +100,14 @@ from scipy.stats import qmc  # noqa: E402
 
 from simgreeks.core import PutSpec  # noqa: E402
 from simgreeks.multi import MultiConfig, label  # noqa: E402
-from simgreeks.reference import FDGrid, bs_option, put_fd_greeks  # noqa: E402
+from simgreeks.reference import bs_option, grid_for, put_fd_greeks  # noqa: E402
 from simgreeks.runner import job_seed  # noqa: E402
 from simgreeks.sampling import SIGMA_BOUNDS, TAILS, plateau_ppf  # noqa: E402
 
 GREEKS = ["price", "delta", "gamma", "theta", "charm", "vega", "volga", "vanna", "rho", "phi",
           "delta_r", "delta_d", "theta_pde"]
-INPUTS = ["id", "S0", "K", "sigma", "r", "d", "T"]
-EXTRA = ["ex_region", "alpha_S", "alpha_sigma"]
+INPUTS = ["id", "S0", "K", "sigma", "r", "d", "T", "steps_per_year"]
+EXTRA = ["ex_region", "alpha_S", "alpha_sigma", "seconds"]
 VERSIONS = [f"{g}_{v}" for g in GREEKS for v in ("oos", "ins", "avg")] + ["default_source"]
 # (low, high, rounding step) of each input drawn uniformly; "moneyness" is S0/K.
 # sigma: SIGMA_BOUNDS (plateau and tails), rounded to SIGMA_STEP
@@ -115,7 +134,7 @@ def sample_options(n: int, S0: float, seed: int, sigma_tail: str = "concave") ->
 
 def spec_of(row) -> PutSpec:
     return PutSpec(S0=row["S0"], K=row["K"], sigma=row["sigma"], r=row["r"], d=row["d"],
-                   T=row["T"])
+                   T=row["T"], steps_per_year=int(row.get("steps_per_year", 50)))
 
 
 def exact(spec: PutSpec) -> dict:
@@ -129,7 +148,8 @@ def exact(spec: PutSpec) -> dict:
         f = dict(bs_option(spec))
     else:
         sd = spec.sigma * np.sqrt(spec.T)
-        grid = (FDGrid(n_x=8001, half_width=abs(np.log(spec.S0 / spec.K)) + 12 * sd + 0.02)
+        grid = (replace(grid_for(spec), n_x=8001,
+                        half_width=abs(np.log(spec.S0 / spec.K)) + 12 * sd + 0.02)
                 if sd < 0.1 else None)
         bumps = {"sigma": min(0.005, spec.sigma / 10),
                  "r": min(0.002, spec.r / 2) if spec.r > 0 else 0.002, "d": 0.002}
@@ -144,15 +164,43 @@ def exact(spec: PutSpec) -> dict:
 
 def one_option(job) -> dict:
     """Label (and reference values) of one option; runs in a worker."""
-    row, base_seed, with_exact = job
+    row, base_seed, with_exact, vf_time = job
     spec = spec_of(row)
     out = dict(row)
-    lab = label(spec, MultiConfig(), job_seed(base_seed, {"id": int(row["id"])}, 0))
-    out.update({k: lab[k] for k in GREEKS + EXTRA})
+    t0 = time.time()
+    lab = label(spec, MultiConfig(vf_time=vf_time), job_seed(base_seed, {"id": int(row["id"])}, 0))
+    out["seconds"] = round(time.time() - t0, 1)
+    out.update({k: lab[k] for k in GREEKS + EXTRA if k != "seconds"})
     out.update({k: lab.get(k, np.nan) for k in VERSIONS})
     if with_exact:
         out.update(exact(spec))
     return out
+
+
+def task_path(out: Path, task: int, ntasks: int) -> Path:
+    return out.with_name(f"{out.stem}.task{task:04d}of{ntasks:04d}.csv")
+
+
+def finish(rows: pd.DataFrame, path: Path) -> pd.DataFrame:
+    df = rows.sort_values("id").reset_index(drop=True)
+    df.insert(df.columns.get_loc("K") + 1, "moneyness", (df.S0 / df.K).round(4))
+    df.to_csv(path, index=False, float_format="%.6g")
+    return df
+
+
+def merge(args) -> None:
+    """Combine the task files of an SCC run into the final CSV."""
+    parts = [task_path(args.out, i, args.ntasks) for i in range(args.ntasks)]
+    missing = [p.name for p in parts if not p.exists()]
+    if missing:
+        sys.exit(f"{len(missing)} of {args.ntasks} task files missing, e.g. {missing[0]} "
+                 "(resubmit the tasks; a running or killed task leaves only its .partial.csv)")
+    df = pd.concat([pd.read_csv(p) for p in parts], ignore_index=True).drop(columns="moneyness")
+    lost = sorted(set(range(args.n)) - set(df["id"]))
+    if lost or len(df) != args.n:
+        sys.exit(f"{len(df)} rows for {args.n} options; missing ids {lost[:10]}")
+    finish(df, args.out)
+    print(f"wrote {args.out} ({len(df)} options from {args.ntasks} task files)")
 
 
 def _clock(s: float) -> str:
@@ -169,68 +217,92 @@ def main():
     ap.add_argument("--sigma-tail", choices=sorted(TAILS), default="concave",
                     help="shape of the sigma tails (1-5 %% and 50-60 %%; simgreeks.sampling)")
     ap.add_argument("--workers", type=int, default=None)
+    ap.add_argument("--steps-per-year", type=int, default=504,
+                    help="exercise dates a year (504: two a business day; 50: the earlier setting)")
+    ap.add_argument("--vf-time", type=float, default=None,
+                    help="value-function label date in years (default: 0.02 above 50 dates a "
+                         "year, else the first exercise date)")
     ap.add_argument("--exact", action="store_true",
                     help="add the reference PDE values (for checking the labels)")
+    ap.add_argument("--exact-every", type=int, default=1,
+                    help="with --exact: reference values only for ids divisible by this")
+    ap.add_argument("--task", type=int, default=None, help="SCC: this task's index, 0-based")
+    ap.add_argument("--ntasks", type=int, default=1, help="SCC: number of tasks")
+    ap.add_argument("--merge", action="store_true", help="SCC: combine the task files")
     ap.add_argument("--no-exact", action="store_true", help=argparse.SUPPRESS)  # old default
     ap.add_argument("--out", type=Path, default=ROOT / "results" / "labels_sample.csv")
     args = ap.parse_args()
+    if args.merge:
+        return merge(args)
+    if args.task is not None and not 0 <= args.task < args.ntasks:
+        ap.error("--task must be in 0 .. ntasks - 1")
+    if args.task is None and args.ntasks > 1:
+        ap.error("--ntasks > 1 needs --task (or --merge)")
+    vf_time = args.vf_time if args.vf_time is not None else (0.02 if args.steps_per_year > 50 else None)
+    out = args.out if args.task is None else task_path(args.out, args.task, args.ntasks)
 
     columns = (INPUTS + GREEKS + EXTRA + VERSIONS
                + ([f"exact_{g}" for g in GREEKS] if args.exact else []))
     settings = json.dumps(dict(n=args.n, S0=args.S0, seed=args.seed, exact=args.exact, versions=True,
-                               ranges=RANGES, sigma=SIGMA_BOUNDS, sigma_tail=args.sigma_tail),
+                               ranges=RANGES, sigma=SIGMA_BOUNDS, sigma_tail=args.sigma_tail,
+                               steps_per_year=args.steps_per_year, vf_time=vf_time,
+                               exact_every=args.exact_every, task=args.task, ntasks=args.ntasks),
                           sort_keys=True)
-    partial = args.out.with_name(args.out.stem + ".partial.csv")
-    meta = args.out.with_name(args.out.stem + ".partial.json")
-    args.out.parent.mkdir(parents=True, exist_ok=True)
+    partial = out.with_name(out.stem + ".partial.csv")
+    meta = out.with_name(out.stem + ".partial.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
 
     opts = sample_options(args.n, args.S0, args.seed, args.sigma_tail)
+    opts["steps_per_year"] = args.steps_per_year
+    if args.task is not None:
+        opts = opts[opts["id"] % args.ntasks == args.task]
+    n_mine = len(opts)
     done = set()
     if partial.exists():
         if not meta.exists() or meta.read_text() != settings:
             sys.exit(f"{partial} was made with other settings; delete it (and {meta.name}) "
                      "or use another --out")
         done = set(pd.read_csv(partial, usecols=["id"])["id"])
-        print(f"resuming: {len(done)} of {args.n} options already done", flush=True)
+        print(f"resuming: {len(done)} of {n_mine} options already done", flush=True)
     else:
         meta.write_text(settings)
     todo = [dict(r) for r in opts.to_dict("records") if r["id"] not in done]
 
     workers = args.workers or os.cpu_count()
-    print(f"{len(todo)} options to label on {workers} processes"
-          f"{', with reference values' if args.exact else ''}", flush=True)
-    t0, n_new, last_pct = time.time(), 0, int(100 * len(done) / args.n)
+    print(f"{len(todo)} options to label on {workers} processes, {args.steps_per_year} exercise "
+          f"dates a year{', with reference values' if args.exact else ''}", flush=True)
+    t0, n_new, last_pct = time.time(), 0, int(100 * len(done) / max(n_mine, 1))
     with open(partial, "a", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=columns, extrasaction="ignore")
         if fh.tell() == 0:
             writer.writeheader()
         ex = ProcessPoolExecutor(max_workers=workers)
-        futures = [ex.submit(one_option, (r, args.seed, args.exact)) for r in todo]
+        futures = [ex.submit(one_option, (r, args.seed,
+                                          args.exact and r["id"] % args.exact_every == 0, vf_time))
+                   for r in todo]
         try:
             for fut in as_completed(futures):
                 writer.writerow(fut.result())
                 fh.flush()
                 n_new += 1
                 n_done = len(done) + n_new
-                pct = int(100 * n_done / args.n)
-                if pct > last_pct or n_done == args.n:
+                pct = int(100 * n_done / n_mine)
+                if pct > last_pct or n_done == n_mine:
                     last_pct = pct
                     elapsed = time.time() - t0
-                    left = elapsed / n_new * (args.n - n_done)
-                    print(f"{pct:3d}% ({n_done}/{args.n}) · {_clock(elapsed)} elapsed · "
+                    left = elapsed / n_new * (n_mine - n_done)
+                    print(f"{pct:3d}% ({n_done}/{n_mine}) · {_clock(elapsed)} elapsed · "
                           f"~{_clock(left)} left", flush=True)
         except KeyboardInterrupt:
             ex.shutdown(wait=False, cancel_futures=True)
-            sys.exit(f"\nstopped after {len(done) + n_new} of {args.n} options; "
+            sys.exit(f"\nstopped after {len(done) + n_new} of {n_mine} options; "
                      "run the same command again to resume")
         ex.shutdown()
 
-    df = pd.read_csv(partial).sort_values("id").reset_index(drop=True)
-    df.insert(df.columns.get_loc("K") + 1, "moneyness", (df.S0 / df.K).round(4))
-    df.to_csv(args.out, index=False, float_format="%.6g")
+    df = finish(pd.read_csv(partial), out)
     partial.unlink()
     meta.unlink()
-    print(f"wrote {args.out} ({len(df)} options, {_clock(time.time() - t0)})")
+    print(f"wrote {out} ({len(df)} options, {_clock(time.time() - t0)})")
 
 
 if __name__ == "__main__":
