@@ -223,7 +223,8 @@ def config_of(variant: str) -> MultiConfig:
     if variant == STAGE2_VARIANT or variant == "D2-daily":
         return MultiConfig(**D2)
     if variant == "PW-504":
-        return MultiConfig(vf_time=0.02)
+        # results/two_per_day was made before the exercise bound became the default
+        return MultiConfig(vf_time=0.02, exercise_bound=False)
     if variant == "D2-daily-vf50":
         return MultiConfig(vf_time=0.02, **D2)
     if variant == "D3o3-oos":
