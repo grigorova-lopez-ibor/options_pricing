@@ -123,3 +123,23 @@ a reference 10-90 s. About 340 CPU hours in all.
     bash scc/submit.sh amd_random 200 02:00:00
     # when qstat -u $USER is empty:
     cd ~/experiments && tar czf amd_out.tar.gz amd_out
+
+## Puts with two exercise dates per day (504 a year), default label
+
+Branch `claude/two-per-day` (from `carlos`). Parts `tpd_check` (35 put check
+options x 100 labels), `tpd_random` (40 options from generate_labels' ranges x
+100 labels) and their references `tpd_check_ref`, `tpd_random_ref` (American
+and 504/yr Bermudan PDE); report `experiments/two_per_day_report.py`. A label
+takes about 50 / 95 / 180 s at T = 0.5 / 1 / 2 and peaks at 2.8 GB at T = 2
+(300,000 main paths x 1,008 dates), within mem_per_core=4G. About 230 CPU hours.
+
+    cd ~/experiments/options_pricing
+    git fetch origin claude/two-per-day && git checkout claude/two-per-day && git pull
+    source ~/venvs/simgreeks/bin/activate
+    export SCC_PROJECT=robustvb OUT=~/experiments/tpd_out
+    bash scc/submit.sh tpd_check_ref 35 01:00:00
+    bash scc/submit.sh tpd_random_ref 40 01:00:00
+    bash scc/submit.sh tpd_check 175 03:00:00
+    bash scc/submit.sh tpd_random 200 03:00:00
+    # when qstat -u $USER is empty:
+    cd ~/experiments && tar czf tpd_out.tar.gz tpd_out
