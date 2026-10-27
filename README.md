@@ -38,7 +38,8 @@ settings as Table 5's σ = 20 %, T = 1 rows.
 | `experiments/theta_check.py` | Simulated Θ vs the reference pricer's finite-difference Θ |
 | `simgreeks/multi.py` | Label generator: price and Δ, Γ, Θ, Vega, Volga, Vanna, Rho, Phi (∂P/∂d, dividend Rho) and cross Greeks by multivariate ISD; label designs D1–D4 (not part of the paper) |
 | `experiments/multi_check.py` | Labels vs closed form (European) and the reference pricer (American); resumable |
-| `experiments/generate_labels.py` | A labelled data set: options drawn over K, σ, r, d, T; progress every 1 %; resumable; `--exact` adds the reference values |
+| `simgreeks/sampling.py` | σ distribution of the training set: plateau on 5–50 % with tails to 1 % and 60 % (not part of the paper) |
+| `experiments/generate_labels.py` | A labelled data set: options drawn over S0/K 0.8–1.2, σ (plateau 5–50 %, tails 1–60 %), r and d 0–5 %, T 2 months–2 years; progress every 1 %; resumable; `--exact` adds the reference values |
 | `experiments/analyze_labels.py` | Sanity checks of a label CSV and, with reference values, the bias and noise of each Greek and where the bias is |
 | `experiments/tournament.py` | Label-design tournament: 4 designs × in/out-of-sample exercise rule; European validation, 33-option American check, 2,500-option comparison; resumable Parquet jobs |
 | `scc/` | BU SCC job arrays for the tournament: environment setup, SGE script, submit wrapper, runbook (`scc/README.md`) |
@@ -352,6 +353,8 @@ Open issues:
 `MultiConfig()` now encodes these choices; the older results files in `results/`
 were produced with α_r = α_d = 0.02 and no shrinking or European region.
 
+Open (on hold): Rho −0.76 % and Phi +0.72 % where r ≥ d (t ≈ 4, 193 options, `results/diagnostics/exercise_bound/summary.md`), concentrated at T < 0.5 in the 1000-label check (`results/labels_1000_new/report.md`); not changed by the exercise bound. To check first: the reference's r and d bumps and grid at short maturity, then the exercise rule (oos vs ins, a larger pilot).
+
 | Choice | Default | Evidence |
 |---|---|---|
 | α_S, α_σ | Paper's selector (Appendix A.2, M = ν + 1) on the pilot paths | Tables 4–5 reproduced with M = ν + 1 |
@@ -367,6 +370,11 @@ were produced with α_r = α_d = 0.02 and no shrinking or European region.
 | Exercise rule | Refitted on the rescaled pilot paths, applied out of sample; in addition refitted in sample on the main paths | In-sample rule alone biased Volga +50 % |
 | Label (plain columns, `label_source="hybrid"`) | Average of the out-of-sample and in-sample labels for price, Δ, Γ, Θ, Vega, Rho, Phi; out-of-sample for Volga, Vanna, ∂Δ/∂r, ∂Δ/∂d | Production check of D2-avg and Stage 2 (below): the two labels are biased in opposite directions; the in-sample Volga is biased +23 % to +69 % |
 | N_pilot = N | 100,000 each | 4× pilot paths did not remove the price bias (`results/diagnostics/price_bias/pilot_size.md`) |
+| r and d Greeks (`rd_greeks`, since the `carlos` branch) | `"pathwise"`: one (S, σ) run; Rho, Phi, ∂Δ/∂r, ∂Δ/∂d are pathwise derivatives on its paths (exercise time held fixed, European control variate, exercise only where the payoff ≥ the European value, `pathwise_bound`); no (S, r), (S, d) runs. `"runs"` with `groups=GROUPS` is design D2 | `results/diagnostics/rd_pathwise/`: Rho and Phi noise per label 0.1–5 % against 7–40 % with the runs; no bias at small r0, d0 where the runs' windows were 2–8 % off; the bound removes a +4 to +7 % Rho bias at r0 < d0. All results above used D2 |
+| Exercise bound (`exercise_bound`, `pathwise_bound`, since the `carlos` branch) | A path is never exercised where the payoff is below the European value (the American continuation value never is), in the price's exercise decisions and in the pathwise Greeks | `results/diagnostics/exercise_bound/summary.md` (400 options, paired): price bias −0.036 % (t −4.7) → −0.011 % (n.s.); where r < d −0.034 % → +0.002 %; typical error of one label price 0.11 → 0.09 %, Δ 0.57 → 0.46 %, Γ 7.0 → 5.7 %, Vega 2.0 → 1.7 %, Volga 59 → 42 %, Vanna 27 → 23 %; no Greek worse. Without the bound in the pathwise Greeks Rho was +4 to +7 % off where r < d (`results/diagnostics/rd_pathwise/bound.md`) |
+| Theta and Charm (`theta_greeks`, since the `carlos` branch) | `"pathwise"`: Θ is the pathwise derivative in maturity (number of exercise dates fixed; Brownian scaling), Charm = ∂Δ/∂t its S-slope in the same regression; the PDE-identity Θ stays as `theta_pde`. `"pde"`: Θ from the PDE identity, no Charm (the earlier labels) | `results/diagnostics/theta_pathwise/`: noise of one label Θ 0.1–1 % against 8–23 % (PDE identity), Charm 15–19 % against 700–1000 % (identity with Speed). With the number of dates fixed, Θ differs from the calendar Θ by 0.3–2.7 % and Charm by up to 6 % at 50 dates a year, halving each time the dates double; both tend to the American values |
+| Pilot width of S (`c0_S_rule`, since the `carlos` branch) | `"sd"`: α0_S = min(0.25, 1.25 σ√T) S0 (the paper's α = 10 at σ = 20 %, T = 1; narrower where σ√T < 0.2) | At σ = 1 %, r > d the fixed 0.25 S0 pilot left α_S 7× wider than the curved part of the price: price up to +37 % / −149 %, Γ −38 % / +108 % near the money; with `"sd"` within about 1 % (`results/diagnostics/low_vol_corner/`). Elsewhere no Greek's bias changes significantly; at σ√T < 0.1 Γ and Θ are up to 1.3× noisier, Volga and Vanna less noisy (`results/diagnostics/pilot_width/summary.md`) |
+| Paths per run (`run_paths`) | (S, σ): 300,000 main + 100,000 pilot (check of the whole label against D2: `results/diagnostics/rd_pathwise/label_check.md`; price, Δ, Γ, Θ as accurate, Vega, Volga, Vanna 1.5–2× and Rho, Phi 7–16× less noisy per label, no significant bias) | 13.0 s per label at T = 1 and 27.3 s at T = 2, against 14.5 s and 32.4 s for D2 (one core). The hybrid label processes the main paths twice (out-of-sample and in-sample rules), so time grows with them: 400,000 main took 17.4 s, 200,000 about 9 s |
 
 Reference values near r = 0: `put_fd_greeks(..., one_sided=("r", "d"))` gives
 forward bumps. Just above r = 0 the price bends sharply (the premium grows faster

@@ -152,8 +152,10 @@ def put_fd(spec: PutSpec, style: str = "bermudan", grid: FDGrid | None = None) -
     Vxx = (v_p - 2 * v_0 + v_m) / h ** 2
     price = float(v_0)
     theta = float((rec[-1][1] - rec[1][1]) / (2 * k))   # V(t=+k) - V(t=-k)
+    # Charm = dDelta/dt, the same central difference applied to Delta
+    charm = float((rec[-1][2] - rec[-1][0] - rec[1][2] + rec[1][0]) / (2 * h) / spec.S0 / (2 * k))
     return dict(price=price, delta=float(Vx / spec.S0),
-                gamma=float((Vxx - Vx) / spec.S0 ** 2), theta=theta,
+                gamma=float((Vxx - Vx) / spec.S0 ** 2), theta=theta, charm=charm,
                 ex_region=bool(spec.intrinsic >= price))
 
 
@@ -212,7 +214,8 @@ def put_fd_greeks(spec: PutSpec, style: str = "bermudan", grid: FDGrid | None = 
 
 
 def bs_put(spec: PutSpec) -> dict:
-    """Closed-form Black-Scholes-Merton Greeks of the European put (Theta = dV/dt)."""
+    """Closed-form Black-Scholes-Merton Greeks of the European put (Theta = dV/dt,
+    Charm = dDelta/dt)."""
     S, K, T, s, r, d = spec.S0, spec.K, spec.T, spec.sigma, spec.r, spec.d
     sq = np.sqrt(T)
     d1 = (np.log(S / K) + (r - d + 0.5 * s * s) * T) / (s * sq)
@@ -226,11 +229,14 @@ def bs_put(spec: PutSpec) -> dict:
                 vega=vega, volga=vega * d1 * d2 / s,
                 rho=-K * T * er * norm.cdf(-d2), phi=S * T * ed * norm.cdf(-d1),
                 vanna=-ed * pdf * d2 / s, vera=-vega * d1 * sq / s, delta_r=ed * pdf * sq / s,
-                delta_d=T * ed * norm.cdf(-d1) - ed * pdf * sq / s)
+                delta_d=T * ed * norm.cdf(-d1) - ed * pdf * sq / s,
+                charm=(-d * ed * norm.cdf(-d1)
+                       - ed * pdf * (2 * (r - d) * T - d2 * s * sq) / (2 * T * s * sq)))
 
 
 def bs_call(spec: PutSpec) -> dict:
-    """Closed-form Black-Scholes-Merton Greeks of the European call (Theta = dV/dt)."""
+    """Closed-form Black-Scholes-Merton Greeks of the European call (Theta = dV/dt,
+    Charm = dDelta/dt)."""
     S, K, T, s, r, d = spec.S0, spec.K, spec.T, spec.sigma, spec.r, spec.d
     sq = np.sqrt(T)
     d1 = (np.log(S / K) + (r - d + 0.5 * s * s) * T) / (s * sq)
@@ -244,7 +250,9 @@ def bs_call(spec: PutSpec) -> dict:
                 vega=vega, volga=vega * d1 * d2 / s,
                 rho=K * T * er * norm.cdf(d2), phi=-S * T * ed * norm.cdf(d1),
                 vanna=-ed * pdf * d2 / s, vera=-vega * d1 * sq / s, delta_r=ed * pdf * sq / s,
-                delta_d=-T * ed * norm.cdf(d1) - ed * pdf * sq / s)
+                delta_d=-T * ed * norm.cdf(d1) - ed * pdf * sq / s,
+                charm=(d * ed * norm.cdf(d1)
+                       - ed * pdf * (2 * (r - d) * T - d2 * s * sq) / (2 * T * s * sq)))
 
 
 def bs_option(spec: PutSpec) -> dict:
@@ -273,10 +281,10 @@ def label_reference(spec: PutSpec, grid: FDGrid | None = None, style: str = "ber
     * exercise region (immediate exercise optimal): price = exercise value,
       Delta = sign (-1 put, +1 call), the other Greeks 0, as in the labels
       (MultiConfig.american_t0).
-    Returns the LABEL_GREEKS (vera=False: without Vera), the <greek>_fwd values
-    and ex_region.
+    Returns the LABEL_GREEKS (vera=False: without Vera), Charm (calendar
+    dDelta/dt), the <greek>_fwd values and ex_region.
     """
-    greeks = [q for q in LABEL_GREEKS if vera or q != "vera"]
+    greeks = [q for q in LABEL_GREEKS if vera or q != "vera"] + ["charm"]
     if spec.no_early_exercise:
         eu = bs_option(spec)
         out = {q: float(eu[q]) for q in greeks}

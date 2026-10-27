@@ -146,7 +146,7 @@ def test_multi_control_variate_is_exact_for_european():
         assert np.isclose(out[k], bs[k], rtol=1e-6, atol=1e-8), k
     assert "vera" not in out                       # no default group has sigma and r
     groups = (("S", "sigma", "r"),)
-    out = label(spec, MultiConfig(N=20_000, style="european", groups=groups), 1)
+    out = label(spec, MultiConfig(N=20_000, style="european", groups=groups, rd_greeks="runs"), 1)
     assert np.isclose(out["vera"], bs["vera"], rtol=1e-6, atol=1e-8)
 
 
@@ -287,7 +287,10 @@ def test_multi_label_widths():
     spec = PutSpec(K=40, T=0.5)
     out = label(spec, MultiConfig(N=20_000), 5)
     assert 0 < out["alpha_S"] <= 10.0 and 0 < out["alpha_sigma"] <= 0.6 * 0.2 / 1.3
-    assert out["alpha_r"] == out["alpha_d"] == 0.03
+    assert "alpha_r" not in out and "alpha_d" not in out       # pathwise: r, d not dispersed
+    from simgreeks.multi import GROUPS
+    runs = label(spec, MultiConfig(N=20_000, groups=GROUPS, rd_greeks="runs"), 5)
+    assert runs["alpha_r"] == runs["alpha_d"] == 0.03
     fixed = label(spec, MultiConfig(N=20_000, widths="fixed"), 5)
     assert np.isclose(fixed["alpha_S"], 0.6 * 40 * 0.2 * np.sqrt(0.5))
     assert np.isclose(fixed["alpha_sigma"], 0.25 * 0.2)
@@ -476,7 +479,7 @@ def test_multi_hybrid_default_label():
               "delta_r", "delta_d"):
         assert hyb[f"{q}_oos"] == oos[q]
         assert hyb[q] == hyb[f"{q}_oos" if q in HYBRID_OOS else f"{q}_avg"]
-    assert hyb["default_source"] == ("avg: price delta gamma vega rho phi theta; "
+    assert hyb["default_source"] == ("avg: price delta gamma vega rho phi theta theta_pde charm; "
                                      "oos: volga vanna delta_r delta_d")
     assert label(spec, MultiConfig(N=20_000, label_source="avg"), np.random.SeedSequence(11))[
         "volga"] == hyb["volga_avg"]
@@ -538,3 +541,110 @@ def test_multi_vf_time():
     b = label(spec, MultiConfig(N=20_000, vf_time=0.02), 4)
     assert all(a[q] == b[q] for q in ("price", "delta", "gamma", "vega", "rho", "phi"))
     assert vf_index(replace(spec, steps_per_year=252), MultiConfig(vf_time=0.02)) == 5
+
+
+def test_sigma_plateau_sampler():
+    from simgreeks.sampling import TAILS, plateau_pdf, plateau_ppf, tail_share
+    u = (np.arange(100_000) + 0.5) / 100_000
+    for tail in TAILS:
+        x = plateau_ppf(u, tail=tail)
+        assert 0.01 <= x.min() and x.max() <= 0.60 and np.all(np.diff(x) >= 0)
+        assert abs(np.mean((x < 0.05) | (x > 0.50)) - tail_share(tail=tail)) < 1e-3
+        mid = x[(x >= 0.05) & (x <= 0.50)]          # uniform on the plateau
+        assert abs(np.mean(mid < 0.275) - 0.5) < 1e-3
+        g = np.linspace(0.01, 0.60, 100_001)
+        assert abs(np.trapezoid(plateau_pdf(g, tail=tail), g) - 1) < 1e-6
+    assert abs(tail_share(tail="linear") - 7 / 52) < 1e-6   # tails 4 + 10 points at half density
+
+
+def test_multi_run_paths():
+    from simgreeks.multi import (GROUPS, RUN_PATHS_RD, MultiConfig, _assemble, design_config,
+                                 run_config)
+    from simgreeks.core import PutSpec
+    cfg = MultiConfig(N=20_000)
+    assert (run_config(cfg, ("S", "sigma")).N, run_config(cfg, ("S", "sigma")).N_pilot) == (60_000, 20_000)
+    assert run_config(cfg, ("S",)).N == 20_000                     # not listed: N
+    rd = MultiConfig(N=20_000, run_paths=RUN_PATHS_RD, groups=GROUPS, rd_greeks="runs")
+    assert (run_config(rd, ("S", "r")).N, run_config(rd, ("S", "r")).N_pilot) == (10_000, 10_000)
+    assert run_config(MultiConfig(N=20_000, run_paths=()), ("S", "sigma")).N == 20_000
+    assert design_config("D2").run_paths == ()
+    # price, Delta, Gamma averaged with weights N
+    base = dict(price=1.0, delta=-0.5, gamma=0.1, vega=np.nan, volga=np.nan, rho=np.nan,
+                phi=np.nan, vanna=np.nan, vera=np.nan, delta_r=np.nan, delta_d=np.nan,
+                dvega_dd=np.nan, drho_dd=np.nan)
+    runs = [dict(base, price=2.0, N=40_000), dict(base, N=10_000), dict(base, N=10_000)]
+    out = _assemble(PutSpec(), cfg, runs)
+    assert abs(out["price"] - (2 * 4 + 1 + 1) / 6) < 1e-12
+
+
+def test_multi_pathwise_labels():
+    from simgreeks.multi import MultiConfig, label, pathwise_labels
+    from simgreeks.reference import bs_call, bs_put
+    # per-path formulas: finite differences of e^{-r tau} payoff(S_tau(r, d)), tau fixed
+    rng = np.random.default_rng(0)
+    for kind in ("put", "call"):
+        spec = PutSpec(K=40, r=0.03, d=0.01, kind=kind)
+        tau = rng.choice([0.25, 0.5, 1.0], 50)
+        x = rng.normal(0, 0.3, 50)                      # log-return less drift, per path
+        def value(r, d):
+            S = spec.S0 * np.exp((r - d) * tau + x)
+            return np.exp(-r * tau) * spec.payoff(S), S
+        _, S = value(spec.r, spec.d)
+        z = {"r": np.full(50, spec.r), "d": np.full(50, spec.d), "sigma": np.full(50, spec.sigma)}
+        W = np.zeros(50)
+        pw = pathwise_labels(spec, MultiConfig(control_variate=False), z, tau, S, W, S, W)
+        h = 1e-7
+        fd_r = (value(spec.r + h, spec.d)[0] - value(spec.r - h, spec.d)[0]) / (2 * h)
+        fd_d = (value(spec.r, spec.d + h)[0] - value(spec.r, spec.d - h)[0]) / (2 * h)
+        assert np.allclose(pw["rho"], fd_r, atol=1e-5) and np.allclose(pw["phi"], fd_d, atol=1e-5)
+    # European style: no exercise, so the pathwise Greeks are the closed form exactly
+    for kind, bs in (("put", bs_put), ("call", bs_call)):
+        spec = PutSpec(K=42, sigma=0.3, T=0.5, d=0.02, kind=kind)
+        out = label(spec, MultiConfig(N=20_000, style="european"), 1)
+        for k in ("rho", "phi", "delta_r", "delta_d"):
+            assert np.isclose(out[k], bs(spec)[k], rtol=1e-6, atol=1e-8), (kind, k)
+
+
+def test_multi_pathwise_config():
+    from simgreeks.multi import GROUPS, MultiConfig
+    import pytest
+    with pytest.raises(ValueError):
+        MultiConfig(groups=GROUPS)                     # r, d runs need rd_greeks="runs"
+    assert MultiConfig().groups == (("S", "sigma"),)
+    MultiConfig(groups=GROUPS, rd_greeks="runs")
+
+
+def test_multi_pathwise_theta():
+    from dataclasses import replace
+    from simgreeks.multi import MultiConfig, label, pathwise_labels
+    from simgreeks.reference import bs_call, bs_put
+    # per-path formula: finite difference in T of e^{-r tau} payoff(S_tau), tau = f T,
+    # W_tau = sqrt(tau) Z (exercise date index fixed)
+    rng = np.random.default_rng(1)
+    for kind in ("put", "call"):
+        spec = PutSpec(K=40, r=0.03, d=0.01, sigma=0.25, kind=kind)
+        f, Z = rng.choice([0.25, 0.5, 1.0], 50), rng.normal(size=50)
+        def value(T):
+            tau = f * T
+            S = spec.S0 * np.exp((spec.r - spec.d - spec.sigma ** 2 / 2) * tau
+                                 + spec.sigma * np.sqrt(tau) * Z)
+            return np.exp(-spec.r * tau) * spec.payoff(S), S, np.sqrt(tau) * Z, tau
+        _, S, W, tau = value(spec.T)
+        z = {"r": np.full(50, spec.r), "d": np.full(50, spec.d), "sigma": np.full(50, spec.sigma)}
+        pw = pathwise_labels(spec, MultiConfig(control_variate=False), z, tau, S, W, S, W)
+        h = 1e-7
+        fd = -(value(spec.T + h)[0] - value(spec.T - h)[0]) / (2 * h)
+        assert np.allclose(pw["theta"], fd, atol=1e-5), kind
+    # European style: Theta and Charm are the closed form exactly; theta_pde is kept
+    for kind, bs in (("put", bs_put), ("call", bs_call)):
+        spec = PutSpec(K=42, sigma=0.3, T=0.5, d=0.02, kind=kind)
+        out = label(spec, MultiConfig(N=20_000, style="european"), 1)
+        for k in ("theta", "charm"):
+            assert np.isclose(out[k], bs(spec)[k], rtol=1e-6, atol=1e-8), (kind, k)
+        assert "theta_pde" in out
+    # the PDE-identity Theta as before
+    spec = PutSpec(K=40, T=0.5)
+    pde = label(spec, MultiConfig(N=20_000, theta_greeks="pde"), 3)
+    assert pde["theta"] == pde["theta_pde"] and "charm" not in pde
+    pw = label(spec, MultiConfig(N=20_000), 3)
+    assert pw["theta"] != pw["theta_pde"] and np.isfinite(pw["charm"])

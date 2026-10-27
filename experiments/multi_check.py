@@ -162,8 +162,8 @@ def check(name, cells, cfg, reps, seed, title, intro, workers=None):
 
 def timing():
     cfg = MultiConfig()
-    lines = [f"# Seconds per label (one process, default MultiConfig: {len(cfg.groups)} runs "
-             "x (100,000 pilot + 100,000 main paths))\n",
+    lines = [f"# Seconds per label (one process, default MultiConfig: {len(cfg.groups)} run(s), "
+             f"rd_greeks={cfg.rd_greeks}, run_paths={cfg.run_paths})\n",
              "| T | seconds |", "|---|---|"]
     for T in (0.5, 1.0, 2.0):
         spec = PutSpec(K=40, T=T)

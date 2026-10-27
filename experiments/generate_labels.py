@@ -1,19 +1,35 @@
 """Generate labels (price and Greeks) for a sample of Bermudan puts. Not part of
 the paper.
 
-Options are drawn on scrambled Sobol points (seeded) over strike, volatility,
-rate, dividend yield and maturity at a fixed S0, then rounded to readable
-values. Each label is one call of simgreeks.multi.label with the default
-MultiConfig; labels scale exactly with (S0, K), so S0 only sets the units.
+Options are drawn on scrambled Sobol points (seeded) over moneyness,
+volatility, rate, dividend yield and maturity at a fixed S0, then rounded:
+
+    S0/K   uniform on [0.8, 1.2]; K = S0 / (S0/K) rounded to 0.01
+    sigma  plateau on [5 %, 50 %] with tails to 1 % and 60 %
+           (simgreeks.sampling.plateau_ppf; --sigma-tail sets their shape), step 0.01 %
+    r, d   uniform on [0, 5 %], step 0.25 % (so the shrinking windows min(0.03, r0)
+           are >= 0.25 %; r0 = 0 is exact)
+    T      uniform on [2 months, 2 years], step 0.001
+
+Each label is one call of simgreeks.multi.label with the default MultiConfig
+(one (S, sigma) run of 300,000 main + 100,000 pilot paths; Rho, Phi, dDelta/dr
+and dDelta/dd pathwise on its paths, see multi.RD_GREEKS); labels scale exactly
+with (S0, K), so S0 only sets the units.
+At T = 2 months a label has round(50 / 6) = 8 exercise dates.
 
     python experiments/generate_labels.py [--n 100] [--S0 100] [--workers N]
-                                          [--seed 1] [--exact] [--out PATH]
+                                          [--seed 1] [--sigma-tail concave]
+                                          [--exact] [--out PATH]
 
 Writes one CSV row per option: the inputs, the label (price, delta, gamma,
-theta, vega, volga, vanna, rho, phi, delta_r, delta_d, ex_region, alpha_S,
-alpha_sigma) and, with --exact, the reference values as exact_<greek>
+theta, charm, vega, volga, vanna, rho, phi, delta_r, delta_d, theta_pde,
+ex_region, alpha_S, alpha_sigma) and, with --exact, the reference values as exact_<greek>
 (reference.put_fd_greeks; where exercising at t_0 is optimal, the exercise
-values K - S0, -1 and 0, as in the labels). The reference values are for
+values K - S0, -1 and 0, as in the labels). theta and charm are pathwise (the
+Theta of a Bermudan option with the number of exercise dates fixed), theta_pde
+the PDE-identity Theta; the reference's Theta and Charm are calendar ones
+(exercise dates fixed in calendar time), which differ from theta and charm by
+0.3-2.7 % and up to ~6 % at 50 dates a year. The reference values are for
 checking the labels (experiments/analyze_labels.py) and add about 25 % to the
 time.
 
@@ -61,27 +77,32 @@ from scipy.stats import qmc  # noqa: E402
 
 from simgreeks.core import PutSpec  # noqa: E402
 from simgreeks.multi import MultiConfig, label  # noqa: E402
-from simgreeks.reference import put_fd_greeks  # noqa: E402
+from simgreeks.reference import FDGrid, bs_option, put_fd_greeks  # noqa: E402
 from simgreeks.runner import job_seed  # noqa: E402
+from simgreeks.sampling import SIGMA_BOUNDS, TAILS, plateau_ppf  # noqa: E402
 
-GREEKS = ["price", "delta", "gamma", "theta", "vega", "volga", "vanna", "rho", "phi",
-          "delta_r", "delta_d"]
+GREEKS = ["price", "delta", "gamma", "theta", "charm", "vega", "volga", "vanna", "rho", "phi",
+          "delta_r", "delta_d", "theta_pde"]
 INPUTS = ["id", "S0", "K", "sigma", "r", "d", "T"]
 EXTRA = ["ex_region", "alpha_S", "alpha_sigma"]
-# (low, high, rounding step) of each input; K as a fraction of S0
-RANGES = {"K": (0.85, 1.15, 0.01), "sigma": (0.10, 0.40, 0.01), "r": (0.0, 0.06, 0.0025),
-          "d": (0.0, 0.04, 0.0025), "T": (0.25, 2.0, 0.05)}
+# (low, high, rounding step) of each input drawn uniformly; "moneyness" is S0/K.
+# sigma: SIGMA_BOUNDS (plateau and tails), rounded to SIGMA_STEP
+RANGES = {"moneyness": (0.8, 1.2, None), "r": (0.0, 0.05, 0.0025),
+          "d": (0.0, 0.05, 0.0025), "T": (1 / 6, 2.0, 0.001)}
+SIGMA_STEP = 0.0001
 
 
-def sample_options(n: int, S0: float, seed: int) -> pd.DataFrame:
+def sample_options(n: int, S0: float, seed: int, sigma_tail: str = "concave") -> pd.DataFrame:
     with warnings.catch_warnings():           # n need not be a power of 2 here
         warnings.simplefilter("ignore", UserWarning)
-        U = qmc.Sobol(d=len(RANGES), scramble=True, seed=seed).random(n)
+        U = qmc.Sobol(d=len(RANGES) + 1, scramble=True, seed=seed).random(n)
     cols = {}
     for j, (k, (lo, hi, step)) in enumerate(RANGES.items()):
-        cols[k] = np.round((lo + (hi - lo) * U[:, j]) / step) * step
+        x = lo + (hi - lo) * U[:, j]
+        cols[k] = x if step is None else np.round(x / step) * step
+    cols["sigma"] = np.round(plateau_ppf(U[:, -1], SIGMA_BOUNDS, sigma_tail) / SIGMA_STEP) * SIGMA_STEP
     df = pd.DataFrame(cols)
-    df["K"] = np.round(df["K"] * S0, 2)
+    df.insert(0, "K", np.round(S0 / df.pop("moneyness"), 2))
     df.insert(0, "S0", S0)
     df.insert(0, "id", np.arange(n))
     return df.round(6)
@@ -93,9 +114,24 @@ def spec_of(row) -> PutSpec:
 
 
 def exact(spec: PutSpec) -> dict:
-    f = put_fd_greeks(spec)
+    """Reference values. No early exercise optimal (r <= 0 <= d): the closed form,
+    as the labels. Otherwise the Bermudan PDE with central bumps sigma/10 (at
+    most 0.005) and r/2 (at most 0.002, so r stays > 0), on a refined grid where
+    sigma sqrt(T) < 0.1: the default grid and the fixed sigma bump 0.005 are off
+    by up to 1.5 % in price and 1 % in Vega at sigma = 1 %, T = 2 months
+    (experiments/diagnostics/low_vol_corner_check.py)."""
+    if spec.no_early_exercise:
+        f = dict(bs_option(spec))
+    else:
+        sd = spec.sigma * np.sqrt(spec.T)
+        grid = (FDGrid(n_x=8001, half_width=abs(np.log(spec.S0 / spec.K)) + 12 * sd + 0.02)
+                if sd < 0.1 else None)
+        bumps = {"sigma": min(0.005, spec.sigma / 10),
+                 "r": min(0.002, spec.r / 2) if spec.r > 0 else 0.002, "d": 0.002}
+        f = dict(put_fd_greeks(spec, "bermudan", grid, bumps, vera=False))
+    f["theta_pde"] = f["theta"]          # the reference has one (calendar) Theta
     out = {g: f[g] for g in GREEKS}
-    if f["ex_region"]:                  # exercise at t_0, as the labels do
+    if f.get("ex_region", False):       # exercise at t_0, as the labels do
         out = {g: 0.0 for g in GREEKS}
         out["price"], out["delta"] = spec.K - spec.S0, -1.0
     return {f"exact_{g}": v for g, v in out.items()}
@@ -124,6 +160,8 @@ def main():
     ap.add_argument("--n", type=int, default=100)
     ap.add_argument("--S0", type=float, default=100.0)
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--sigma-tail", choices=sorted(TAILS), default="concave",
+                    help="shape of the sigma tails (1-5 %% and 50-60 %%; simgreeks.sampling)")
     ap.add_argument("--workers", type=int, default=None)
     ap.add_argument("--exact", action="store_true",
                     help="add the reference PDE values (for checking the labels)")
@@ -133,12 +171,13 @@ def main():
 
     columns = INPUTS + GREEKS + EXTRA + ([f"exact_{g}" for g in GREEKS] if args.exact else [])
     settings = json.dumps(dict(n=args.n, S0=args.S0, seed=args.seed, exact=args.exact,
-                               ranges=RANGES), sort_keys=True)
+                               ranges=RANGES, sigma=SIGMA_BOUNDS, sigma_tail=args.sigma_tail),
+                          sort_keys=True)
     partial = args.out.with_name(args.out.stem + ".partial.csv")
     meta = args.out.with_name(args.out.stem + ".partial.json")
     args.out.parent.mkdir(parents=True, exist_ok=True)
 
-    opts = sample_options(args.n, args.S0, args.seed)
+    opts = sample_options(args.n, args.S0, args.seed, args.sigma_tail)
     done = set()
     if partial.exists():
         if not meta.exists() or meta.read_text() != settings:
