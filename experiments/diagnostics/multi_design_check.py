@@ -48,8 +48,8 @@ BASE = dict(groups=(("S", "sigma"),), widths="fixed", vf_rule="max", american_t0
 VARIANTS = {
     "insample-epa": MultiConfig(**BASE, exercise_rule="insample", param_kernel="epanechnikov"),
     "insample-uni": MultiConfig(**BASE, exercise_rule="insample"),
-    "pilot-epa": MultiConfig(**BASE, param_kernel="epanechnikov", pilot_widen=1.0),
-    "pilot-uni": MultiConfig(**BASE),
+    "pilot-epa": MultiConfig(**BASE, exercise_rule="pilot", param_kernel="epanechnikov", pilot_widen=1.0),
+    "pilot-uni": MultiConfig(**BASE, exercise_rule="pilot"),
 }
 QUANTS = ["price", "delta", "gamma", "vega", "volga", "vanna"]
 

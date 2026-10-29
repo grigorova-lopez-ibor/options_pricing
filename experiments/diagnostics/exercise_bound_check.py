@@ -45,7 +45,7 @@ SEED = 3                                  # the 1000-label run's --seed
 
 def one(row):
     t0 = time.time()
-    lab = label(spec_of(row), MultiConfig(exercise_bound=True), job_seed(SEED, {"id": int(row["id"])}, 0))
+    lab = label(spec_of(row), MultiConfig(exercise_bound=True, exercise_rule="pilot"), job_seed(SEED, {"id": int(row["id"])}, 0))
     return dict(id=int(row["id"]), seconds=time.time() - t0, new_ex_region=bool(lab["ex_region"]),
                 **{f"new_{g}": lab[g] for g in G})
 

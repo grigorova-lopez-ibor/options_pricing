@@ -76,12 +76,13 @@ def reference(i_opt):
 
 
 SETTINGS = tuple(sys.argv[2:])
+PIN = ("exercise_rule=pilot",)   # the out-of-sample rule these results were made with
 
 
 def one(job):
     i, spec, rep = job
     t0 = time.time()
-    lab = label(spec, config_from(SETTINGS), np.random.SeedSequence([4245, i, rep]))
+    lab = label(spec, config_from(PIN + SETTINGS), np.random.SeedSequence([4245, i, rep]))
     return dict(option=i, rep=rep, seconds=time.time() - t0, ex_region=bool(lab["ex_region"]),
                 european_region=bool(lab["european_region"]), **{g: lab[g] for g in G})
 

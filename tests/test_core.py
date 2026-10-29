@@ -454,35 +454,52 @@ def test_multi_s_greeks_from_the_s_run():
 
 
 def test_multi_insample_too_keeps_the_oos_label():
-    # D2-avg: the plain keys are the out-of-sample label, identical to MultiConfig();
+    # D2-avg (exercise_rule="pilot"): the plain keys are the out-of-sample label;
     # <greek>_avg is the mean of the out-of-sample and in-sample labels
     from simgreeks.multi import MultiConfig, label
     spec = PutSpec(K=40.0, sigma=0.2, T=0.25, r=0.06, d=0.0)
-    base = label(spec, MultiConfig(N=20_000, label_source="oos"), np.random.SeedSequence(11))
-    both = label(spec, MultiConfig(N=20_000, insample_too=True, label_source="oos"),
+    base = label(spec, MultiConfig(N=20_000, exercise_rule="pilot", label_source="oos"),
+                 np.random.SeedSequence(11))
+    both = label(spec, MultiConfig(N=20_000, exercise_rule="pilot", insample_too=True, label_source="oos"),
                  np.random.SeedSequence(11))
     for q in ("price", "delta", "gamma", "vega", "rho", "phi"):
         assert both[q] == base[q] == both[f"{q}_oos"]
         assert np.isclose(both[f"{q}_avg"], 0.5 * (both[q] + both[f"{q}_ins"]))
-    eu = label(PutSpec(r=0.0, d=0.01), MultiConfig(insample_too=True), 1)
+    eu = label(PutSpec(r=0.0, d=0.01), MultiConfig(exercise_rule="pilot", insample_too=True), 1)
     assert eu["price_ins"] == eu["price_avg"] == eu["price"]
 
 
-def test_multi_hybrid_default_label():
-    # default label: avg for price, Delta, Gamma, Theta, Vega, Rho, Phi; oos for
-    # Volga, Vanna and the other cross derivatives; the oos part equals D2-prod
+def test_multi_hybrid_label():
+    # exercise_rule="pilot", label_source="hybrid": avg for price, Delta, Gamma, Theta,
+    # Vega, Rho, Phi; oos for Volga, Vanna and the other cross derivatives
     from simgreeks.multi import HYBRID_OOS, MultiConfig, label
     spec = PutSpec(K=40.0, sigma=0.2, T=0.25, r=0.06, d=0.0)
-    oos = label(spec, MultiConfig(N=20_000, label_source="oos"), np.random.SeedSequence(11))
-    hyb = label(spec, MultiConfig(N=20_000), np.random.SeedSequence(11))
+    oos = label(spec, MultiConfig(N=20_000, exercise_rule="pilot", label_source="oos"),
+                np.random.SeedSequence(11))
+    hyb = label(spec, MultiConfig(N=20_000, exercise_rule="pilot"), np.random.SeedSequence(11))
     for q in ("price", "delta", "gamma", "theta", "vega", "volga", "vanna", "rho", "phi",
               "delta_r", "delta_d"):
         assert hyb[f"{q}_oos"] == oos[q]
         assert hyb[q] == hyb[f"{q}_oos" if q in HYBRID_OOS else f"{q}_avg"]
     assert hyb["default_source"] == ("avg: price delta gamma vega rho phi theta theta_pde charm; "
                                      "oos: volga vanna delta_r delta_d")
-    assert label(spec, MultiConfig(N=20_000, label_source="avg"), np.random.SeedSequence(11))[
-        "volga"] == hyb["volga_avg"]
+    assert label(spec, MultiConfig(N=20_000, exercise_rule="pilot", label_source="avg"),
+                 np.random.SeedSequence(11))["volga"] == hyb["volga_avg"]
+
+
+def test_multi_default_label_is_the_insample_one():
+    # default (exercise_rule="insample"): one version only, equal to the in-sample
+    # version of the pilot-rule label with the same seed (same paths)
+    from simgreeks.multi import MultiConfig, label
+    spec = PutSpec(K=40.0, sigma=0.2, T=0.25, r=0.06, d=0.0)
+    ins = label(spec, MultiConfig(N=20_000), np.random.SeedSequence(11))
+    hyb = label(spec, MultiConfig(N=20_000, exercise_rule="pilot"), np.random.SeedSequence(11))
+    assert not any(k.endswith(("_oos", "_ins", "_avg")) for k in ins) and "default_source" not in ins
+    for q in ("price", "delta", "gamma", "theta", "charm", "vega", "volga", "vanna", "rho", "phi",
+              "delta_r", "delta_d"):
+        assert np.isclose(ins[q], hyb[f"{q}_ins"], rtol=1e-12, atol=1e-14), q
+    eu = label(PutSpec(r=0.0, d=0.01), MultiConfig(), 1)
+    assert eu["european_region"] and "price_ins" not in eu
 
 
 def test_call_payoff_and_no_early_exercise_region():

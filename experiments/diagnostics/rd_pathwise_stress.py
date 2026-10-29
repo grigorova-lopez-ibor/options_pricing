@@ -57,7 +57,7 @@ def sample(n):
 
 def one(job):
     part, i, spec, rep = job
-    cfg = m.MultiConfig()
+    cfg = m.MultiConfig(exercise_rule="pilot")
     seeds = np.random.SeedSequence([4242, part == "grid", i, rep]).spawn(3)
     t0 = time.time()
     sc = m.run_config(cfg, ("S", "sigma"))

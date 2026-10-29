@@ -213,7 +213,8 @@ from simgreeks.multi import MultiConfig, label
 label(PutSpec(S0=40, K=40, sigma=0.2, r=0.06, d=0.0, T=1.0), MultiConfig(), seed=1)
 # -> price, delta, gamma, theta, vega, volga, vanna, rho, phi (dP/dd, dividend Rho),
 #    delta_r, delta_d, ex_region, european_region, alpha_S, alpha_sigma, alpha_r, alpha_d,
-#    <greek>_oos, <greek>_ins, <greek>_avg and default_source (see "The default label")
+#    (with exercise_rule="pilot" also <greek>_oos, <greek>_ins, <greek>_avg and
+#    default_source; see "The default label")
 #    (with a joint design, also vera, dvega_dd, drho_dd; see "Label designs" below)
 ```
 
@@ -367,8 +368,7 @@ Open (on hold): Rho −0.76 % and Phi +0.72 % where r ≥ d (t ≈ 4, 193 option
 | Exercise-rule control variate (Y − D) | Removed | Price −0.23 % instead of −0.12 % (`results/diagnostics/price_bias/rule_cv`) |
 | t1 control variate | On | Paired check without it: noise 1.5–1.8× (`results/multi_check_american_no_cv_vs_american.md`) |
 | Exercise at t1 | By the rule, not max(Z, Ĉ) | max(Z, Ĉ) biased Volga +34 % |
-| Exercise rule | Refitted on the rescaled pilot paths, applied out of sample; in addition refitted in sample on the main paths | In-sample rule alone biased Volga +50 % |
-| Label (plain columns, `label_source="hybrid"`) | Average of the out-of-sample and in-sample labels for price, Δ, Γ, Θ, Vega, Rho, Phi; out-of-sample for Volga, Vanna, ∂Δ/∂r, ∂Δ/∂d | Production check of D2-avg and Stage 2 (below): the two labels are biased in opposite directions; the in-sample Volga is biased +23 % to +69 % |
+| Exercise rule (`exercise_rule`, since 29 Oct 2026) | `"insample"`: fitted on the label's own 300,000 main paths; the pilot only chooses the widths. One version per output. `"pilot"` gives the earlier labels (rule from the pilot, with `<greek>_oos`, `_ins`, `_avg`) | See [The in-sample default](#the-in-sample-default-exercise_ruleinsample). Until then: out-of-sample rule plus an in-sample refit, averaged (`label_source="hybrid"`), because at 100,000 main paths and 50 dates a year the in-sample Volga was biased +23 % to +69 % and the in-sample price high |
 | N_pilot = N | 100,000 each | 4× pilot paths did not remove the price bias (`results/diagnostics/price_bias/pilot_size.md`) |
 | r and d Greeks (`rd_greeks`, since the `carlos` branch) | `"pathwise"`: one (S, σ) run; Rho, Phi, ∂Δ/∂r, ∂Δ/∂d are pathwise derivatives on its paths (exercise time held fixed, European control variate, exercise only where the payoff ≥ the European value, `pathwise_bound`); no (S, r), (S, d) runs. `"runs"` with `groups=GROUPS` is design D2 | `results/diagnostics/rd_pathwise/`: Rho and Phi noise per label 0.1–5 % against 7–40 % with the runs; no bias at small r0, d0 where the runs' windows were 2–8 % off; the bound removes a +4 to +7 % Rho bias at r0 < d0. All results above used D2 |
 | Exercise bound (`exercise_bound`, `pathwise_bound`, since the `carlos` branch) | A path is never exercised where the payoff is below the European value (the American continuation value never is), in the price's exercise decisions and in the pathwise Greeks | `results/diagnostics/exercise_bound/summary.md` (400 options, paired): price bias −0.036 % (t −4.7) → −0.011 % (n.s.); where r < d −0.034 % → +0.002 %; typical error of one label price 0.11 → 0.09 %, Δ 0.57 → 0.46 %, Γ 7.0 → 5.7 %, Vega 2.0 → 1.7 %, Volga 59 → 42 %, Vanna 27 → 23 %; no Greek worse. Without the bound in the pathwise Greeks Rho was +4 to +7 % off where r < d (`results/diagnostics/rd_pathwise/bound.md`) |
@@ -386,7 +386,7 @@ Open issues:
   tried; the cause is unknown (the window does not cross r = 0 there).
 - Out of sample the price is about 0.15 % low (an estimated exercise rule is
   suboptimal, so the price is a lower bound) and Δ about 0.3 % high; the
-  hybrid default removes this (see "The default label").
+  in-sample default removes this (see "The in-sample default").
 - Volga (out of sample) is about 10 % of its typical size too low, most of it
   deep in the money; Rho and Phi have 2–8 % biases of opposite sign at single
   options where r and d are both 2–4 % and close (Stage 2 noise check).
@@ -436,7 +436,33 @@ Outcome: D2 stays the production design. The D3 variant with order 3 in r and d
 price and Δ only because its price comes from a run in S alone, and adds a
 Rho bias (+0.7 %); the hybrid default below fixes price and Δ within D2.
 
-### The default label (`label_source="hybrid"`) and Stage 2
+### The in-sample default (`exercise_rule="insample"`)
+
+Since 29 Oct 2026 (the state before is the branch `save/oct29`) the label fits
+the exercise rule on its own main paths. The foresight bias of an in-sample rule
+falls like 1/N, while the out-of-sample rule's shortfall is set by the pilot and
+does not change with the main paths (`results/diagnostics/paths_labels/`: price
+oos −0.20 to −0.24 % at 75k–600k main paths, ins +0.15 → +0.02 %). At 300,000
+main paths and 504 dates a year (`results/two_per_day`, 75 options × 100
+labels; median bias of each version against the American PDE):
+
+| Greek | out of sample | in sample |
+|---|---|---|
+| price | −0.19 % (significant in all options) | +0.02 % (check) / +0.05 % (random) |
+| Δ | +0.41 % | −0.06 % |
+| Γ | −2.7 % (random) | +0.8 % |
+| Θ, Vega, Vanna, Charm | within noise | within noise (Θ less noisy: 0.25 against 0.34 %) |
+| Rho, Phi | +0.50 % / −0.38 % | +0.19 % / −0.16 % (and noise 1.1 against 1.7 %) |
+| ∂Δ/∂r, ∂Δ/∂d | −3.6 % / +3.2 % | −2.3 % / +2.2 % |
+| Volga | −8.8 % | **+20 to +25 %** (significant in 43–68 % of options; one label's noise is 100–120 %) |
+
+The in-sample label is the less biased one for every output but Volga, and a
+label takes about 60 % of the time of one with both rules (50 s against 78 s at
+T = 1, 504 dates a year). With the same seed it equals the earlier `<greek>_ins`
+exactly (`tests/test_core.py`). The open cost is Volga's foresight bias, which
+falls with the main paths (+45 % at 100k in Stage A, +20–25 % at 300k).
+
+### The earlier default label (`exercise_rule="pilot"`, `label_source="hybrid"`) and Stage 2
 
 Each run of a label fits the exercise rule twice: out of sample on the
 rescaled pilot paths (**oos**, a lower bound: price low, Δ high) and in sample

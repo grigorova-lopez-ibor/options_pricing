@@ -109,7 +109,7 @@ def run_fits(spec, cfg, z, Y, y_theta, y_cal, eu, charm_eu, speed_eu):
 
 def one(job):
     part, i, spec, rep = job
-    cfg = m.MultiConfig()
+    cfg = m.MultiConfig(exercise_rule="pilot")
     sc = m.run_config(cfg, DIMS)
     rng = np.random.default_rng(np.random.SeedSequence([4247, part == "grid", i, rep]))
     alphas, scale, rules = m.pilot(spec, sc, DIMS, rng)

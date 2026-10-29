@@ -15,7 +15,7 @@ Q = ["price", "delta", "gamma", "theta", "charm", "vega", "volga", "vanna", "rho
 def one(job):
     i, N, rep = job
     o = options("tpd_check"); row = o[o.id == i].iloc[0]
-    cfg = MultiConfig(vf_time=0.02, N=N, N_pilot=100_000)
+    cfg = MultiConfig(vf_time=0.02, N=N, N_pilot=100_000, exercise_rule="pilot")
     t = time.time(); l = label(spec_of(row), cfg, job_seed(9100, {"id": i}, rep))
     out = dict(id=i, N_main=3 * N, rep=rep, seconds=time.time() - t)
     for q in Q:

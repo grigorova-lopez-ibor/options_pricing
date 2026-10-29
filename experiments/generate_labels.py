@@ -12,9 +12,10 @@ volatility, rate, dividend yield and maturity at a fixed S0, then rounded:
     T      uniform on [2 months, 2 years], step 0.001
 
 Each label is one call of simgreeks.multi.label with the default MultiConfig
-(one (S, sigma) run of 300,000 main + 100,000 pilot paths; Rho, Phi, dDelta/dr,
-dDelta/dd, Theta and Charm pathwise on its paths); labels scale exactly with
-(S0, K), so S0 only sets the units.
+(one (S, sigma) run of 300,000 main + 100,000 pilot paths; the exercise rule
+fitted on the main paths (in sample; the pilot only chooses the widths); Rho,
+Phi, dDelta/dr, dDelta/dd, Theta and Charm pathwise on its paths); labels scale
+exactly with (S0, K), so S0 only sets the units.
 
 Exercise dates. --steps-per-year (default 504, two a business day): the puts are
 Bermudan with J = round(steps_per_year T) dates. At 504 a year they are within
@@ -23,7 +24,9 @@ Rho and Phi (results/diagnostics/exercise_frequency); 50 a year is the earlier
 setting. Above 50 dates a year the value-function label is taken at the date
 nearest 1/50 year (MultiConfig.vf_time = 0.02, --vf-time), as validated at daily
 dates (results/american_daily) and at 504 (results/two_per_day). A label at 504
-takes about 35 / 76 / 150 s at T = 0.5 / 1 / 2 on one core and up to 2.8 GB.
+takes about 50 s at T = 1 on one core, about 60 % of the label with both the
+out-of-sample and in-sample rules (78 s; 35 / 150 s at T = 0.5 / 2 with both),
+and up to 2.8 GB.
 
     python experiments/generate_labels.py [--n 100] [--S0 100] [--workers N]
                                           [--seed 1] [--sigma-tail concave]
@@ -40,11 +43,7 @@ id, so the result does not depend on the number of tasks.
 
 Writes one CSV row per option: the inputs, the label (price, delta, gamma,
 theta, charm, vega, volga, vanna, rho, phi, delta_r, delta_d, theta_pde,
-ex_region, alpha_S, alpha_sigma), each Greek's three versions <greek>_oos (the
-exercise rule fitted on the pilot paths), <greek>_ins (refitted on the main
-paths) and <greek>_avg (their average), with default_source naming which one
-the plain column is (multi.HYBRID_OOS), so the version to train on can be
-chosen per Greek after the run, and, with --exact, the reference values as exact_<greek>
+ex_region, alpha_S, alpha_sigma) and, with --exact, the reference values as exact_<greek>
 (reference.put_fd_greeks; where exercising at t_0 is optimal, the exercise
 values K - S0, -1 and 0, as in the labels; --exact-every k: only for the
 options with id % k == 0, e.g. 10 for a 10 % check subset). theta and charm are pathwise (the
@@ -108,7 +107,6 @@ GREEKS = ["price", "delta", "gamma", "theta", "charm", "vega", "volga", "vanna",
           "delta_r", "delta_d", "theta_pde"]
 INPUTS = ["id", "S0", "K", "sigma", "r", "d", "T", "steps_per_year"]
 EXTRA = ["ex_region", "alpha_S", "alpha_sigma", "seconds"]
-VERSIONS = [f"{g}_{v}" for g in GREEKS for v in ("oos", "ins", "avg")] + ["default_source"]
 # (low, high, rounding step) of each input drawn uniformly; "moneyness" is S0/K.
 # sigma: SIGMA_BOUNDS (plateau and tails), rounded to SIGMA_STEP
 RANGES = {"moneyness": (0.8, 1.2, None), "r": (0.0, 0.05, 0.0025),
@@ -171,7 +169,6 @@ def one_option(job) -> dict:
     lab = label(spec, MultiConfig(vf_time=vf_time), job_seed(base_seed, {"id": int(row["id"])}, 0))
     out["seconds"] = round(time.time() - t0, 1)
     out.update({k: lab[k] for k in GREEKS + EXTRA if k != "seconds"})
-    out.update({k: lab.get(k, np.nan) for k in VERSIONS})
     if with_exact:
         out.update(exact(spec))
     return out
@@ -241,9 +238,9 @@ def main():
     vf_time = args.vf_time if args.vf_time is not None else (0.02 if args.steps_per_year > 50 else None)
     out = args.out if args.task is None else task_path(args.out, args.task, args.ntasks)
 
-    columns = (INPUTS + GREEKS + EXTRA + VERSIONS
+    columns = (INPUTS + GREEKS + EXTRA
                + ([f"exact_{g}" for g in GREEKS] if args.exact else []))
-    settings = json.dumps(dict(n=args.n, S0=args.S0, seed=args.seed, exact=args.exact, versions=True,
+    settings = json.dumps(dict(n=args.n, S0=args.S0, seed=args.seed, exact=args.exact, exercise_rule="insample",
                                ranges=RANGES, sigma=SIGMA_BOUNDS, sigma_tail=args.sigma_tail,
                                steps_per_year=args.steps_per_year, vf_time=vf_time,
                                exact_every=args.exact_every, task=args.task, ntasks=args.ntasks),

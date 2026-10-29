@@ -100,7 +100,7 @@ class Shared:
 
 def one(job):
     i, rep = job
-    spec, cfg = OPTIONS[i], m.MultiConfig(label_source="oos")
+    spec, cfg = OPTIONS[i], m.MultiConfig(label_source="oos", exercise_rule="pilot")
     ss = np.random.SeedSequence([9001, i, rep])
     seeds = ss.spawn(3)
     t0 = time.time()

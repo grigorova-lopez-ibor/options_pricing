@@ -29,7 +29,8 @@ from simgreeks.reference import label_reference  # noqa: E402
 
 G = ["price", "delta", "gamma", "theta", "vega", "volga", "vanna", "rho", "phi",
      "delta_r", "delta_d"]
-CONFIGS = {"new": MultiConfig(), "D2": MultiConfig(groups=GROUPS, run_paths=(), rd_greeks="runs")}
+CONFIGS = {"new": MultiConfig(exercise_rule="pilot"),
+           "D2": MultiConfig(groups=GROUPS, run_paths=(), rd_greeks="runs", exercise_rule="pilot")}
 
 
 def one(job):

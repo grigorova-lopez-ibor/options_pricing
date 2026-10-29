@@ -47,7 +47,7 @@ Each run has two phases on independent paths:
      and sigma; r and d optional) are dispersed widely: alpha0_S = c0_S S0 (the
      paper's alpha = 10 at S0 = 40), alpha0_sigma = c0_sigma sigma, alpha0_r,
      alpha0_d; the others by pilot_widen times their fixed width. The pilot
-       * fits the exercise rule (exercise_rule="pilot"), and
+       * fits the exercise rule (only with exercise_rule="pilot"), and
        * chooses each selected width with the paper's selector (Appendix A.2,
          local order M = nu + 1, see methods.SELECTOR_ORDERS) applied to the
          pilot's partial residuals for that coordinate, i.e. the label minus
@@ -55,8 +55,9 @@ Each run has two phases on independent paths:
          the Gamma for S (nu = 2), the Volga for sigma (nu = 2) and, when
          selected, Rho and Phi for r and d (nu = nu_rd = 1).
   2. Main (N paths). The coordinates are dispersed with the chosen widths, the
-     pilot's exercise rule is applied, and the Taylor regression gives the
-     Greeks.
+     exercise rule is fitted on these paths (exercise_rule="insample", the
+     default) or the pilot's rule is applied ("pilot"), and the Taylor
+     regression gives the Greeks.
 
 Why the pilot. Anything estimated on the same paths as the Greeks biases them:
   * an in-sample exercise rule has foresight, which raises the value most
@@ -69,6 +70,10 @@ Why the pilot. Anything estimated on the same paths as the Greeks biases them:
     look curved, which is when the Greek estimate has that noise: in the
     paper's 2-step method this biases the Gamma of in-the-money options by
     +2.6 % (Tables 5-9 pooled). Independent pilot paths remove the correlation.
+The foresight bias falls like 1/N: at N = 300k main paths it is about 0 for
+the price and Delta and below the out-of-sample rule's shortfall for every
+output but Volga, so the default fits the rule on the main paths and keeps the
+pilot for the widths only.
 
 widths="fixed" skips the selection and uses the placeholder widths
 alpha_S = c_S S0 sigma sqrt(T), alpha_sigma = c_sigma sigma, alpha_r, alpha_d.
@@ -171,7 +176,12 @@ GREEKS = {
     "drho_dd": (0, 0, 1, 1),     # d2P / dr dd     (needs r and d in one run)
 }
 S_GREEKS = ("price", "delta", "gamma")
-# Default label (MultiConfig.label_source = "hybrid"): the average of the
+# Default label: the exercise rule refitted on the main paths (exercise_rule =
+# "insample"). At 300k main paths and 504 dates a year its foresight bias is
+# about 0 for the price and Delta and it is the less biased version for every
+# output but Volga (+20-25 %), at about 60 % of the time of a label with both
+# versions (results/two_per_day, results/diagnostics/paths_labels).
+# With exercise_rule = "pilot" (MultiConfig.label_source = "hybrid"): the average of the
 # out-of-sample and in-sample labels, except for the Greeks listed here, which
 # keep the out-of-sample label. The out-of-sample price is biased low and its
 # Delta high (the rule fitted on the pilot is suboptimal on the main paths, a
@@ -220,7 +230,9 @@ class MultiConfig:
     alpha_d: float = 0.03          # fixed alpha_d (same)
     param_kernel: str = "uniform"  # ISD map of sigma, r, d (S keeps eq. 25's Epanechnikov)
     # pilot
-    exercise_rule: str = "pilot"   # "pilot": fitted on the pilot paths; "insample"
+    exercise_rule: str = "insample"  # "insample" (default): fitted on the main paths themselves;
+    #                                  "pilot": fitted on the pilot paths (out of sample), which
+    #                                  also gives <greek>_ins and <greek>_avg (label_source)
     N_pilot: int | None = None     # pilot paths (default N)
     pilot_widen: float = 1.3       # pilot box >= pilot_widen x main box, for each parameter
     # regressions
@@ -247,11 +259,13 @@ class MultiConfig:
     alpha_d_shrink: str = "d0"     # fixed alpha_d = min(alpha_d, d0) ("d0") or min(alpha_d, r0) ("r0") when > 0; "" off
     european_region: bool = True   # r0 <= 0 and d0 >= 0: exact European label (see label)
     t0_max_order: tuple = ()       # t = 0 basis: (param, max exponent) caps, e.g. (("r", 2), ("d", 2))
-    insample_too: bool = False     # also the in-sample label on the same main paths (<greek>_ins, <greek>_avg)
+    insample_too: bool = False     # exercise_rule="pilot": also the in-sample label on the same main paths
+    #                                (<greek>_ins, <greek>_avg)
     vf_time: float | None = None   # value-function label at the exercise date nearest this time
     #                                (None: t_1, the paper's); exercise before it by the rule
-    label_source: str = "hybrid"   # plain <greek> keys: "hybrid" (avg, but oos for HYBRID_OOS), "avg" or
-    #                                "oos" (D2-prod); "hybrid" and "avg" imply insample_too
+    label_source: str = "hybrid"   # exercise_rule="pilot" only, plain <greek> keys: "hybrid" (avg, but oos
+    #                                for HYBRID_OOS), "avg" or "oos" (D2-prod); "hybrid" and "avg" imply
+    #                                insample_too
 
     def __post_init__(self):
         for dims in self.groups:
@@ -992,7 +1006,10 @@ def _add_ins_avg(out: dict, ins: dict) -> None:
 
 
 def _with_ins(cfg: MultiConfig) -> bool:
-    return cfg.insample_too or cfg.label_source != "oos"
+    """Whether a label has the in-sample and averaged versions: only with the
+    pilot's (out-of-sample) rule; with exercise_rule="insample" the label is
+    the in-sample one."""
+    return cfg.exercise_rule == "pilot" and (cfg.insample_too or cfg.label_source != "oos")
 
 
 def _set_default(out: dict, cfg: MultiConfig) -> None:

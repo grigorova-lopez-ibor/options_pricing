@@ -209,7 +209,7 @@ def spec_of(row) -> PutSpec:
 
 
 D2 = dict(groups=GROUPS, run_paths=(), rd_greeks="runs", c0_S_rule="fixed", theta_greeks="pde",
-          exercise_bound=False)
+          exercise_bound=False, exercise_rule="pilot")
 
 
 def config_of(variant: str) -> MultiConfig:
@@ -223,8 +223,9 @@ def config_of(variant: str) -> MultiConfig:
     if variant == STAGE2_VARIANT or variant == "D2-daily":
         return MultiConfig(**D2)
     if variant == "PW-504":
-        # results/two_per_day was made before the exercise bound became the default
-        return MultiConfig(vf_time=0.02, exercise_bound=False)
+        # results/two_per_day was made before the exercise bound and the in-sample
+        # rule became the defaults
+        return MultiConfig(vf_time=0.02, exercise_bound=False, exercise_rule="pilot")
     if variant == "D2-daily-vf50":
         return MultiConfig(vf_time=0.02, **D2)
     if variant == "D3o3-oos":

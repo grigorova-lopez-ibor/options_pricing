@@ -34,7 +34,8 @@ from simgreeks.multi import MultiConfig, label  # noqa: E402
 from simgreeks.reference import FDGrid, bs_option, put_fd_greeks  # noqa: E402
 
 G = ["price", "delta", "gamma", "theta", "vega", "volga", "vanna", "rho", "phi"]
-CONFIGS = {"fixed": MultiConfig(c0_S_rule="fixed"), "sd": MultiConfig(c0_S_rule="sd")}
+CONFIGS = {"fixed": MultiConfig(c0_S_rule="fixed", exercise_rule="pilot"),
+           "sd": MultiConfig(c0_S_rule="sd", exercise_rule="pilot")}
 OUT = ROOT / "results" / "diagnostics" / "pilot_width"
 
 

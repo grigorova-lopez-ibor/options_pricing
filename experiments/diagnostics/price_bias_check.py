@@ -216,7 +216,7 @@ def main():
         settings = json.loads((out / "settings.json").read_text()) \
             if (out / "settings.json").exists() else []
     else:
-        cfg, settings = config_from(args.set), args.set
+        cfg, settings = config_from(("exercise_rule=pilot",) + tuple(args.set)), args.set
         configs = [dict(spec=spec_of(o), cfg=cfg, fn=replication, tags=dict(zip(KEYS, o)))
                    for o in OPTIONS]
         mc = run_configs(configs, args.reps, base_seed=4242, workers=args.workers)

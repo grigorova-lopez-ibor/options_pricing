@@ -150,12 +150,14 @@ takes about 50 / 95 / 180 s at T = 0.5 / 1 / 2 and peaks at 2.8 GB at T = 2
 0.8–1.2, σ plateau 5–50 % with concave tails to 1 % and 60 %, r and d 0–5 %, T 2
 months–2 years) and labels each once with the default label at 504 exercise dates
 a year (two a business day; within 0.015 % median, 0.07 % max of the American
-price, `results/diagnostics/exercise_frequency`). Each row has every Greek in three
-versions (`_oos`, `_ins`, `_avg`) and, for ids divisible by `EXACT_EVERY`, the PDE
-reference values (`exact_*`). A label takes about 35 / 76 / 150 s at T = 0.5 / 1 / 2
-(about 100 s on average) and up to 2.8 GB, within mem_per_core=4G; a reference adds
-about 30-60 s. So 25,000 labels with references on 10 % are about 750 CPU hours:
-with 400 tasks, about 2 hours each.
+price, `results/diagnostics/exercise_frequency`). The label fits the exercise
+rule on its own main paths (in sample, one version per Greek; the state before is
+the branch `save/oct29`). Each row has, for ids divisible by `EXACT_EVERY`, the PDE
+reference values (`exact_*`). A label takes about 50 s at T = 1 (about 60 % of the
+35 / 76 / 150 s at T = 0.5 / 1 / 2 of the earlier label with both rules) and up to
+2.8 GB, within mem_per_core=4G; a reference adds about 2-9 s. So 25,000 labels
+with references on 10 % are about 450 CPU hours: with 400 tasks, about 1-1.5 hours
+each.
 
     cd /projectnb/<project>/<user>/options_pricing
     git pull

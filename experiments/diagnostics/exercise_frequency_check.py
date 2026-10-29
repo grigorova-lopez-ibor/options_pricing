@@ -76,7 +76,7 @@ def one_timing(job):
     spy, T, k = job
     spec = PutSpec(S0=40, K=40, sigma=0.2, r=0.04, d=0.01, T=T, steps_per_year=spy)
     t0 = time.time()
-    label(spec, MultiConfig(vf_time=0.02), k)
+    label(spec, MultiConfig(vf_time=0.02, exercise_rule="pilot"), k)
     return dict(spy=spy, T=T, seconds=time.time() - t0)
 
 

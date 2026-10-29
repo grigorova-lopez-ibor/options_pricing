@@ -36,7 +36,7 @@ METHODS = [f"pw_{rule}{tag}" for tag in ("", "_bound") for rule in ("oos", "ins"
 
 def one(job):
     part, i, spec, rep = job
-    sc = m.run_config(m.MultiConfig(), ("S", "sigma"))
+    sc = m.run_config(m.MultiConfig(exercise_rule="pilot"), ("S", "sigma"))
     rng = np.random.default_rng(np.random.SeedSequence([4243, part == "grid", i, rep]))
     alphas, scale, rules = m.pilot(spec, sc, ("S", "sigma"), rng)
     z = m.isd_multi(spec, sc, alphas, rng)
