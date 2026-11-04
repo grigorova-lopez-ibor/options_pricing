@@ -57,7 +57,11 @@ def report_paths() -> list:
             rows.append(dict(part=part, id=i, N=N, greek=q, **s))
     d = pd.DataFrame(rows)
     Ns = sorted(d.N.unique())
-    t = raw.groupby("N_main").seconds.mean()
+    measured = raw.groupby("N_main").seconds.mean()
+    # 300k and 600k ran on an otherwise idle machine; 150k and 450k shared it with other
+    # jobs, so their times are inflated. Time per label ~ k N from the two clean runs.
+    k = (measured[300_000] * 300_000 + measured[600_000] * 600_000) / (300_000 ** 2 + 600_000 ** 2)
+    t = pd.Series({n: k * n for n in Ns})
     lines = ["# In-sample label against the number of main paths", "",
              "Not part of the paper. `experiments/diagnostics/insample_studies.py paths`: the default "
              "in-sample label (exercise bound on) at 150k, 300k, 450k and 600k main paths (pilot 100k), 504 "
@@ -65,8 +69,11 @@ def report_paths() -> list:
              "the 600k Volga check (picked as the worst in-sample Volga in results/two_per_day, so the "
              "biases here are larger than typical). Reference: the American PDE. Options whose label is "
              "exact (r < d: no path exercises early) are left out per Greek.", "",
-             "Mean time per label (4 processes on this machine): "
-             + ", ".join(f"{int(n / 1000)}k {t[n]:.1f} s" for n in Ns) + ".", "",
+             "Mean time per label measured (4 processes on this machine): "
+             + ", ".join(f"{int(n / 1000)}k {measured[n]:.1f} s" for n in Ns) + ". The 150k and 450k "
+             "labels ran while other jobs used the machine, so their times are inflated; the budget below "
+             f"uses t(N) = {1000 * k:.4f} s per 1,000 main paths, fitted to the 300k and 600k runs (made "
+             "under the same conditions): " + ", ".join(f"{int(n / 1000)}k {t[n]:.1f} s" for n in Ns) + ".", "",
              "Median over the options of |bias| and of the noise of one label, % of |PDE|:", "",
              "| Greek | options | " + " | ".join(f"|bias| {int(n / 1000)}k" for n in Ns) + " | "
              + " | ".join(f"noise {int(n / 1000)}k" for n in Ns) + " |",
