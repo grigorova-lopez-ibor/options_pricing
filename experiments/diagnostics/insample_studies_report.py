@@ -233,7 +233,7 @@ def report_crn() -> list:
              "the mean over each option's k nearest neighbours, and a cubic polynomial fitted to all 2,000. "
              "What a smoother leaves is the error a network trained on these labels would keep. Errors in % "
              "of |PDE|; options with |PDE| < 1 % of the largest and exact labels left out per Greek.", "",
-             "| Greek | mode | one label (RMS) | corr. with nearest neighbour | mean of 10 nearest | mean of 50 nearest | cubic fit |",
+             "| Greek | mode | one label: median abs. / RMS | corr. with nearest neighbour | mean of 10 nearest | mean of 50 nearest | cubic fit |",
              "|---|---|---|---|---|---|---|"]
     from itertools import combinations_with_replacement
     P = np.column_stack([np.ones(len(Z))] + [np.prod(Z.values[:, list(c)], axis=1)
@@ -254,10 +254,12 @@ def report_crn() -> list:
             coef = np.linalg.lstsq(P[m], ev[m], rcond=None)[0]
             fit = P @ coef
             rms = lambda a: float(np.sqrt(np.nanmean(np.where(m, a, np.nan) ** 2)))
-            lines.append(f"| {q} | {mode} | {rms(ev):.3g} | {corr:+.2f} | {rms(k10):.3g} | {rms(k50):.3g} | "
+            lines.append(f"| {q} | {mode} | {np.nanmedian(np.abs(ev)):.3g} / {rms(ev):.3g} | {corr:+.2f} | {rms(k10):.3g} | {rms(k50):.3g} | "
                          f"{rms(fit):.3g} |")
     t = raw.groupby("mode").seconds.mean()
-    lines += ["", "Time per label: " + ", ".join(f"{k} {v:.1f} s" for k, v in t.items()) + ".", ""]
+    lines += ["", "RMS columns are sensitive to single options with near-zero reference values (e.g. one "
+              "option at σ = 3.5 % has a Vega error of 620 % with common random numbers and 63 % without); "
+              "the medians are the robust comparison.", "", "Time per label: " + ", ".join(f"{k} {v:.1f} s" for k, v in t.items()) + ".", ""]
     return lines
 
 
