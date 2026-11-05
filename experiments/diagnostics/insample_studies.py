@@ -16,6 +16,9 @@ Studies:
   crn    common random numbers: 2,000 options from the training-set ranges at
          50 dates a year, labelled once with a fresh seed each (independent)
          and once with one seed for all (common random numbers), plus the PDE.
+  widthrule  the width rule fitted to the selector's alpha* (RULE_S, RULE_SIGMA) at 0.5,
+         1, 1.5, 2 x, against the selector, out of sample: 25 options from the
+         training ranges with r > d, 20 labels each, 252 dates a year, PDE.
   alpha  alpha*: on 6 options, 30 labels with the selector (alpha* as chosen),
          then 30 labels at fixed widths 0.5, 0.75, 1, 1.5, 2 x the median alpha*
          of S and sigma, 504 dates a year.
@@ -201,8 +204,57 @@ def study_alpha(reps: int, workers: int) -> None:
     execute(run_label, jobs, path, ["part", "id", "mult", "rep"], workers)
 
 
-STUDIES = {"paths": study_paths, "dates": study_dates, "crn": study_crn, "alpha": study_alpha}
-DEFAULT_REPS = {"paths": 40, "dates": 30, "crn": 1, "alpha": 30}
+# Width rule fitted to the selector's median alpha* over the 67 options of results/two_per_day
+# (bias_distribution.py; log alpha_S / (S0 sigma sqrt T) on log sigma sqrt T and log T: R^2 0.87)
+RULE_S = (0.154, 0.658, -0.194)        # alpha_S = a S0 (sigma sqrt T)^b T^c
+RULE_SIGMA = 0.222                     # alpha_sigma = RULE_SIGMA sigma
+RULE_MULTS = (0.5, 1.0, 1.5, 2.0)
+
+
+def rule_widths(s: PutSpec, mult: float) -> tuple:
+    """(c_S, c_sigma) of MultiConfig for the width rule times ``mult``, capped like the selector."""
+    a, b, c = RULE_S
+    sd = s.sigma * np.sqrt(s.T)
+    aS = mult * a * s.S0 * sd ** b * s.T ** c
+    aS = min(aS, min(0.25, 1.25 * sd) * s.S0)                   # the selector's cap: the pilot width
+    return float(aS / (s.S0 * sd)), float(min(mult * RULE_SIGMA, 0.75))
+
+
+def widthrule_options(n: int = 25) -> pd.DataFrame:
+    """n options from the training-set ranges (a Sobol draw not used to fit the rule)
+    with early exercise possible and informative (r > d)."""
+    from generate_labels import sample_options
+    o = sample_options(400, 40.0, seed=2026)
+    return o[o.r > o.d].head(n).reset_index(drop=True)
+
+
+def study_widthrule(reps: int, workers: int) -> None:
+    spy = 252
+    opts = widthrule_options()
+    specs = {int(r.id): PutSpec(S0=float(r.S0), K=float(r.K), sigma=float(r.sigma), r=float(r.r),
+                                d=float(r.d), T=float(r.T), steps_per_year=spy) for r in opts.itertuples()}
+    refs = []
+    for i, s in specs.items():
+        refs.append(dict(id=i, style="bermudan", spec=spec_dict(s)))
+        refs.append(dict(id=i, style="american", spec=spec_dict(s)))
+    execute(run_ref, refs, OUT / "widthrule" / "ref.csv", ["id", "style"], workers)
+    jobs = []
+    for rep in range(reps):
+        for i, s in specs.items():
+            jobs.append(dict(id=i, mult=0.0, rep=rep, spec=spec_dict(s), cfg=dict(vf_time=0.02),
+                             seed=[9950, i, rep]))
+            for m in RULE_MULTS:
+                c_S, c_sigma = rule_widths(s, m)
+                jobs.append(dict(id=i, mult=m, rep=rep, spec=spec_dict(s),
+                                 cfg=dict(vf_time=0.02, widths="fixed", c_S=c_S, c_sigma=c_sigma,
+                                          pilot_widen=1.0),
+                                 seed=[9950, i, rep]))
+    execute(run_label, jobs, OUT / "widthrule" / "raw.csv", ["id", "mult", "rep"], workers)
+
+
+STUDIES = {"paths": study_paths, "dates": study_dates, "crn": study_crn, "alpha": study_alpha,
+           "widthrule": study_widthrule}
+DEFAULT_REPS = {"paths": 40, "dates": 30, "crn": 1, "alpha": 30, "widthrule": 20}
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)

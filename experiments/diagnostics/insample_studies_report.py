@@ -263,7 +263,88 @@ def report_crn() -> list:
     return lines
 
 
-REPORTS = {"paths": report_paths, "alpha": report_alpha, "dates": report_dates, "crn": report_crn}
+# ------------------------------------------------------------------ width rule
+def report_widthrule() -> list:
+    from scipy.stats import binomtest
+    from insample_studies import RULE_MULTS, RULE_S, RULE_SIGMA
+    raw = pd.read_csv(OUT / "widthrule" / "raw.csv")
+    ref = pd.read_csv(OUT / "widthrule" / "ref.csv")
+    be = ref[ref["style"] == "bermudan"].set_index("id")
+    am = ref[ref["style"] == "american"].set_index("id")
+    configs = [0.0] + list(RULE_MULTS)
+    name = {0.0: "selector"} | {m: f"rule {m:g}×" for m in RULE_MULTS}
+    rows = []
+    for (i, m), g in raw.groupby(["id", "mult"]):
+        for q in SHOW:
+            rb, ra = be.loc[i, q], am.loc[i, q]
+            if abs(rb) < 0.01 * be[q].abs().max() or be.loc[i, "ex_region"]:
+                continue
+            sb, sa = stats(g, rb, q), stats(g, ra, q)
+            if sb["noise"] < 1e-9:
+                continue
+            b2 = max(sb["bias"] ** 2 - sb["se"] ** 2, 0.0)          # bias with its own noise removed
+            rows.append(dict(id=i, mult=m, greek=q, bias=sb["bias"], bias_am=sa["bias"], se=sb["se"],
+                             noise=sb["noise"], e1=np.sqrt(b2 + sb["noise"] ** 2),
+                             e100=np.sqrt(b2 + sb["noise"] ** 2 / 100)))
+    d = pd.DataFrame(rows)
+    t = raw.groupby("mult").seconds.mean()
+    a, b, c = RULE_S
+    lines = ["# Width rule against the selector, out of sample", "",
+             "Not part of the paper. `experiments/diagnostics/insample_studies.py widthrule`. The rule was "
+             "fitted to the selector's median alpha* over the 67 options of results/two_per_day "
+             f"(bias_distribution.py): alpha_S = {a} S0 (σ√T)^{b} T^{c} (capped at the pilot width "
+             f"min(0.25, 1.25 σ√T) S0, as the selector is), alpha_σ = {RULE_SIGMA} σ. It is tested here on 25 "
+             "other options from the training-set ranges (Sobol draw, r > d so that early exercise matters), "
+             "20 in-sample labels per option and configuration, 252 dates a year, 300k main paths: the "
+             "selector (the default: pilot of 100k paths, alpha* label by label) and the rule at 0.5, 1, 1.5 "
+             "and 2 × (no pilot). Bias against the Bermudan PDE at the same dates (the method's own error); "
+             "the bias against the American PDE adds the 252/yr gap (≤ 0.12 %, results/diagnostics/"
+             "insample_studies/dates). Error of one label = √(b² + noise²), of the mean of 100 labels = "
+             "√(b² + noise²/100), b the bias with its sampling noise removed; % of |PDE|, median over the "
+             "options. Options in the exercise region, Greeks below 1 % of their largest |PDE| and exact "
+             "labels are left out.", "",
+             "Time per label: " + ", ".join(f"{name[m]} {t[m]:.1f} s" for m in configs) + ".", ""]
+    for col, title in (("e100", "Error of the mean of 100 labels (the bias matters)"),
+                       ("e1", "Error of one label (the noise matters)")):
+        lines += [f"{title}:", "", "| Greek | options | " + " | ".join(name[m] for m in configs) + " |",
+                  "|---|---|" + "---|" * len(configs)]
+        for q in SHOW:
+            x = d[d.greek == q]
+            if x.empty:
+                continue
+            v = [x[x.mult == m][col].median() for m in configs]
+            k = int(np.nanargmin(v))
+            lines.append(f"| {q} | {x.id.nunique()} | " + " | ".join(
+                (f"**{u:.3g}**" if j == k else f"{u:.3g}") for j, u in enumerate(v)) + " |")
+        lines.append("")
+    lines += ["Paired by option: share of options where the rule's mean-of-100 error is below the "
+              "selector's, and the two-sided sign-test p-value:", "",
+              "| Greek | " + " | ".join(name[m] for m in RULE_MULTS) + " |", "|---|" + "---|" * len(RULE_MULTS)]
+    for q in SHOW:
+        x = d[d.greek == q].pivot_table(index="id", columns="mult", values="e100")
+        if x.empty or 0.0 not in x:
+            continue
+        cells = []
+        for m in RULE_MULTS:
+            y = x[[0.0, m]].dropna()
+            wins = int((y[m] < y[0.0]).sum())
+            n = len(y)
+            p = binomtest(wins, n).pvalue if n else float("nan")
+            cells.append(f"{wins}/{n} (p = {p:.2g})")
+        lines.append(f"| {q} | " + " | ".join(cells) + " |")
+    lines += ["", "Median bias against the American PDE (signed, %):", "",
+              "| Greek | " + " | ".join(name[m] for m in configs) + " |", "|---|" + "---|" * len(configs)]
+    for q in SHOW:
+        x = d[d.greek == q]
+        if x.empty:
+            continue
+        lines.append(f"| {q} | " + " | ".join(f"{x[x.mult == m].bias_am.median():+.3g}" for m in configs) + " |")
+    lines.append("")
+    return lines
+
+
+REPORTS = {"paths": report_paths, "alpha": report_alpha, "dates": report_dates, "crn": report_crn,
+           "widthrule": report_widthrule}
 
 if __name__ == "__main__":
     for s in (sys.argv[1:] or REPORTS):
