@@ -162,7 +162,7 @@ def crn_options(n: int = 2000) -> pd.DataFrame:
 def study_crn(reps: int, workers: int) -> None:
     opts = crn_options()
     specs = {int(r.id): PutSpec(S0=float(r.S0), K=float(r.K), sigma=float(r.sigma), r=float(r.r),
-                                d=float(r.d), T=float(r["T"]), steps_per_year=50)
+                                d=float(r.d), T=float(r.T), steps_per_year=50)
              for r in opts.itertuples()}
     refs = [dict(id=i, style="bermudan", spec=spec_dict(s)) for i, s in specs.items()]
     execute(run_ref, refs, OUT / "crn" / "ref.csv", ["id", "style"], workers)
