@@ -149,17 +149,11 @@ takes about 50 / 95 / 180 s at T = 0.5 / 1 / 2 and peaks at 2.8 GB at T = 2
 `experiments/diagnostics/freq_paths_grid.py`: 15 puts across the input ranges x 30
 labels at every (126, 252, 504, 1008 dates a year) x (75k, 150k, 300k, 600k main
 paths), pilot 100k; references: American PDE and the Bermudan PDE at each frequency.
-About 100 CPU hours (`python experiments/diagnostics/freq_paths_grid.py plan --ntasks 50`).
-Labels are split by estimated memory: `small` (< 3.3 GB, 1 core, 4 GB) and `big`
-(up to ~11 GB at 1008/yr, 600k paths, T = 2: 4 slots x 4 GB = 16 GB).
+About 100 CPU hours. Labels are split by estimated memory: `small` (< 3.3 GB) and
+`big` (up to ~11 GB, run with 4 slots x 4 GB). From the repository root:
 
-    cd ~/experiments/options_pricing && git pull
-    source ~/venvs/simgreeks/bin/activate
-    export OUT=~/experiments/freq_paths_out     # SCC_PROJECT=<project> optional
-    bash scc/submit_freq_paths.sh ref 15 01:00:00
-    bash scc/submit_freq_paths.sh big 25 04:00:00
-    bash scc/submit_freq_paths.sh small 50 04:00:00
-    # progress / when qstat -u $USER is empty:
-    python experiments/diagnostics/freq_paths_grid.py count --out $OUT
-    python experiments/diagnostics/freq_paths_report.py --out $OUT     # $OUT/freq_paths/report.md
-    cd ~/experiments && tar czf freq_paths_out.tar.gz freq_paths_out
+    qsub -t 1-15 -v CMD=ref,NTASKS=15 scc/freq_paths.qsub
+    qsub -t 1-25 -pe omp 4 -v SIZE=big,NTASKS=25 scc/freq_paths.qsub
+    qsub scc/freq_paths.qsub                     # small labels, 50 tasks
+    python experiments/diagnostics/freq_paths_grid.py count --out ~/experiments/freq_paths_out
+    python experiments/diagnostics/freq_paths_report.py --out ~/experiments/freq_paths_out

@@ -1,16 +1,22 @@
 #!/bin/bash -l
-# SGE job array for experiments/diagnostics/freq_paths_grid.py. Submit with
-# scc/submit_freq_paths.sh, which sets CMD (run or ref), SIZE, NTASKS, OUT.
-# Output is resumable: a failed task can simply be resubmitted.
+# Exercise dates a year x main paths grid (experiments/diagnostics/freq_paths_grid.py).
+# Run from the repository root. Default: the small labels as 50 tasks:
+#   qsub scc/freq_paths.qsub
+#   qsub -t 1-15 -v CMD=ref,NTASKS=15 scc/freq_paths.qsub                          # PDE references
+#   qsub -t 1-25 -pe omp 4 -v SIZE=big,NTASKS=25 scc/freq_paths.qsub               # big labels (16 GB)
+# Resumable: resubmit the same command if tasks died.
+#$ -N freq_paths
 #$ -cwd
 #$ -j y
-#$ -o logs/
-set -euo pipefail
+#$ -t 1-50
+#$ -pe omp 1
+#$ -l mem_per_core=4G
+#$ -l h_rt=04:00:00
+CMD=${CMD:-run}; SIZE=${SIZE:-small}; NTASKS=${NTASKS:-50}; OUT=${OUT:-$HOME/experiments/freq_paths_out}
 module load python3/3.10.12 2>/dev/null || module load python3
 source "${VENV:-$HOME/venvs/simgreeks}/bin/activate"
-export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1
-ARGS=("$CMD" --task $((SGE_TASK_ID - 1)) --ntasks "$NTASKS" --out "$OUT")
-[ "$CMD" = "run" ] && ARGS+=(--size "$SIZE")
-echo "$(date) host $(hostname) task $SGE_TASK_ID: python experiments/diagnostics/freq_paths_grid.py ${ARGS[*]}"
-python experiments/diagnostics/freq_paths_grid.py "${ARGS[@]}"
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+echo "$(date) $(hostname) task $SGE_TASK_ID: $CMD $SIZE"
+python experiments/diagnostics/freq_paths_grid.py "$CMD" --task $((SGE_TASK_ID - 1)) --ntasks "$NTASKS" \
+    --size "$SIZE" --out "$OUT"
 echo "$(date) done"
