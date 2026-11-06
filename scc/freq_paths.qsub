@@ -1,0 +1,16 @@
+#!/bin/bash -l
+# SGE job array for experiments/diagnostics/freq_paths_grid.py. Submit with
+# scc/submit_freq_paths.sh, which sets CMD (run or ref), SIZE, NTASKS, OUT.
+# Output is resumable: a failed task can simply be resubmitted.
+#$ -cwd
+#$ -j y
+#$ -o logs/
+set -euo pipefail
+module load python3/3.10.12 2>/dev/null || module load python3
+source "${VENV:-$HOME/venvs/simgreeks}/bin/activate"
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1
+ARGS=("$CMD" --task $((SGE_TASK_ID - 1)) --ntasks "$NTASKS" --out "$OUT")
+[ "$CMD" = "run" ] && ARGS+=(--size "$SIZE")
+echo "$(date) host $(hostname) task $SGE_TASK_ID: python experiments/diagnostics/freq_paths_grid.py ${ARGS[*]}"
+python experiments/diagnostics/freq_paths_grid.py "${ARGS[@]}"
+echo "$(date) done"
