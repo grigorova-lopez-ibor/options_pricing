@@ -1,0 +1,19 @@
+#!/bin/bash -l
+# Exercise dates a year x main paths grid (experiments/diagnostics/freq_paths_grid.py).
+# PDE references (15 tasks). Run from the repository root: qsub scc/freq_paths_ref.qsub
+# Resumable: resubmit the same command if tasks died.
+#$ -N freq_paths_ref
+#$ -cwd
+#$ -j y
+#$ -t 1-15
+#$ -pe omp 1
+#$ -l mem_per_core=4G
+#$ -l h_rt=04:00:00
+CMD=ref; SIZE=small; NTASKS=15; OUT=${OUT:-$HOME/experiments/freq_paths_out}
+module load python3/3.10.12 2>/dev/null || module load python3
+source "${VENV:-$HOME/venvs/simgreeks}/bin/activate"
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+echo "$(date) $(hostname) task $SGE_TASK_ID: $CMD $SIZE"
+python experiments/diagnostics/freq_paths_grid.py "$CMD" --task $((SGE_TASK_ID - 1)) --ntasks "$NTASKS" \
+    --size "$SIZE" --out "$OUT"
+echo "$(date) done"

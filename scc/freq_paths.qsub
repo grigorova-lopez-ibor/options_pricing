@@ -2,8 +2,8 @@
 # Exercise dates a year x main paths grid (experiments/diagnostics/freq_paths_grid.py).
 # Run from the repository root. Default: the small labels as 50 tasks:
 #   qsub scc/freq_paths.qsub
-#   qsub -t 1-15 -v CMD=ref,NTASKS=15 scc/freq_paths.qsub                          # PDE references
-#   qsub -t 1-25 -pe omp 4 -v SIZE=big,NTASKS=25 scc/freq_paths.qsub               # big labels (16 GB)
+#   qsub scc/freq_paths_ref.qsub     # PDE references (15 tasks)
+#   qsub scc/freq_paths_big.qsub     # big labels (25 tasks, 16 GB each)
 # Resumable: resubmit the same command if tasks died.
 #$ -N freq_paths
 #$ -cwd

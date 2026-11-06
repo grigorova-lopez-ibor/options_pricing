@@ -152,8 +152,8 @@ paths), pilot 100k; references: American PDE and the Bermudan PDE at each freque
 About 100 CPU hours. Labels are split by estimated memory: `small` (< 3.3 GB) and
 `big` (up to ~11 GB, run with 4 slots x 4 GB). From the repository root:
 
-    qsub -t 1-15 -v CMD=ref,NTASKS=15 scc/freq_paths.qsub
-    qsub -t 1-25 -pe omp 4 -v SIZE=big,NTASKS=25 scc/freq_paths.qsub
+    qsub scc/freq_paths_ref.qsub                 # PDE references, 15 tasks
+    qsub scc/freq_paths_big.qsub                 # big labels, 25 tasks x 16 GB
     qsub scc/freq_paths.qsub                     # small labels, 50 tasks
     python experiments/diagnostics/freq_paths_grid.py count --out ~/experiments/freq_paths_out
     python experiments/diagnostics/freq_paths_report.py --out ~/experiments/freq_paths_out
