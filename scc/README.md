@@ -155,7 +155,7 @@ Labels are split by estimated memory: `small` (< 3.3 GB, 1 core, 4 GB) and `big`
 
     cd ~/experiments/options_pricing && git pull
     source ~/venvs/simgreeks/bin/activate
-    export SCC_PROJECT=robustvb OUT=~/experiments/freq_paths_out
+    export OUT=~/experiments/freq_paths_out     # SCC_PROJECT=<project> optional
     bash scc/submit_freq_paths.sh ref 15 01:00:00
     bash scc/submit_freq_paths.sh big 25 04:00:00
     bash scc/submit_freq_paths.sh small 50 04:00:00
