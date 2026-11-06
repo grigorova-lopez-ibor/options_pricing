@@ -1,17 +1,18 @@
-"""Report of freq_paths_grid.py: bias and noise of the in-sample label against the
-number of exercise dates a year (SPY) and of main paths.
+"""Report of freq_paths_grid.py: bias of the in-sample label against the number of
+exercise dates a year and of main paths, with the time per label.
 
-    python experiments/diagnostics/freq_paths_report.py --out OUT     # writes OUT/freq_paths/report.md
+    python experiments/diagnostics/freq_paths_report.py --out OUT [--dest DIR]
 
-Per option and setting: rel. errors in % of |American PDE|; options with
-|American| < 1 % of the largest and exact labels (exercise at t_0, no early
-exercise) are left out. Cells are means over the options:
-* gap      = |Bermudan(SPY) - American|, the exercise-date bias (exact, PDE);
-* sim bias = |mean of the labels - Bermudan(SPY)|, the simulation bias;
-* bias     = |mean of the labels - American|, the label's total bias;
-* floor    = sqrt(2/pi) se, the part of the two MAEs above explained by noise alone;
-* noise    = median sd of one label;
-* seconds and peak memory per label."""
+Reads OUT/freq_paths (labels and references) and writes report.md and
+per_option.csv to DIR (default OUT/freq_paths). Per option and setting, errors in
+% of |American PDE|; options with |American| < 1 % of the largest and exact labels
+(exercise at t_0, no early exercise) are left out. Table cells are means over the
+options of
+* total bias      |mean of the labels - American|;
+* simulation bias |mean of the labels - Bermudan(dates a year)|;
+* bias from the Bermudan approximation |Bermudan - American| (exact, PDE);
+* noise floor (false bias) sqrt(2/pi) se: the |bias| an unbiased label would show
+  from the noise left in the mean of the labels (se = sd of one label / sqrt(labels))."""
 import argparse
 import sys
 from pathlib import Path
@@ -25,8 +26,11 @@ import pandas as pd  # noqa: E402
 
 import freq_paths_grid as G  # noqa: E402
 
-GREEKS = ["price", "delta", "gamma", "theta", "vega", "rho", "phi", "charm", "volga", "vanna",
+GREEKS = ["price", "delta", "gamma", "theta", "vega", "volga", "vanna", "rho", "phi", "charm",
           "delta_r", "delta_d"]
+NAMES = {"price": "Price", "delta": "Delta", "gamma": "Gamma", "theta": "Theta", "vega": "Vega",
+         "volga": "Volga", "vanna": "Vanna", "rho": "Rho", "phi": "Phi", "charm": "Charm",
+         "delta_r": "dDelta/dr", "delta_d": "dDelta/dd"}
 
 
 def per_option(lab: pd.DataFrame, refs: pd.DataFrame) -> pd.DataFrame:
@@ -49,61 +53,78 @@ def per_option(lab: pd.DataFrame, refs: pd.DataFrame) -> pd.DataFrame:
     big = df.groupby("greek").am.transform(lambda s: s.abs().max())
     df = df[(df.am.abs() > 0.01 * big) & ~df.exact].copy()
     s = 100 / df.am.abs()
-    df["gap"] = (df.berm - df.am).abs() * s
+    df["approx"] = (df.berm - df.am).abs() * s
     df["sim"] = (df["mean"] - df.berm).abs() * s
-    df["bias"] = (df["mean"] - df.am).abs() * s
+    df["total"] = (df["mean"] - df.am).abs() * s
     df["floor"] = np.sqrt(2 / np.pi) * df.se * s
     df["noise"] = df.sd * s
     return df
 
 
-def table(po: pd.DataFrame, q: str, col: str, fmt="{:.3g}") -> list[str]:
-    d = po[po.greek == q]
-    agg = d.groupby(["spy", "N_main"])[col].median() if col == "noise" else d.groupby(["spy", "N_main"])[col].mean()
-    out = ["| SPY \\ main paths | " + " | ".join(f"{n // 1000}k" for n in G.N_MAIN) + " |",
-           "|---|" + "---|" * len(G.N_MAIN)]
-    for spy in G.SPYS:
-        out.append(f"| {spy} | " + " | ".join(fmt.format(agg.get((spy, n), np.nan)) for n in G.N_MAIN) + " |")
-    return out
+def fmt(x: float) -> str:
+    return "–" if not np.isfinite(x) else (f"{x:.2f}" if abs(x) < 10 else f"{x:.1f}")
 
 
-def report(out: str) -> str:
+def report(out: str, dest: str | None = None) -> str:
     lab, refs = G.load(out)
     po = per_option(lab, refs)
-    w = [f"# In-sample label against exercise dates a year and main paths\n",
-         f"{len(lab)} labels of {len(G.jobs())}; {po.id.nunique()} options used "
-         f"(of {len(G.OPTIONS)}); pilot {G.N_PILOT:,} paths. % of |American PDE|; means over the "
-         "options except noise (median). See the module docstring for the columns.\n"]
-    t = lab.groupby(["spy", "N_main"]).agg(seconds=("seconds", "mean"), gb=("rss_mb", "max"))
-    w.append("## Time per label (s, mean over options) / peak memory (GB)\n")
-    w.append("| SPY \\ main paths | " + " | ".join(f"{n // 1000}k" for n in G.N_MAIN) + " |")
-    w.append("|---|" + "---|" * len(G.N_MAIN))
+    t = lab.groupby(["spy", "N_main"]).seconds.mean()
+    w = ["# Bias against the number of exercise dates a year and of main paths\n",
+         f"In-sample label (one (S, sigma) run, pathwise Rho, Phi, Theta, value-function label at "
+         f"1/50 year, exercise_bound=False), puts. {len(G.OPTIONS)} options across the input ranges "
+         f"x {G.REPS} labels at every combination of {', '.join(map(str, G.SPYS))} exercise dates a year "
+         f"and {', '.join(f'{n // 1000}k' for n in G.N_MAIN)} main paths; pilot {G.N_PILOT // 1000}k paths, "
+         f"the same seeds at every combination; {len(lab)} labels. References: American PDE and "
+         "Bermudan PDE at each number of dates a year. Generated by "
+         "`experiments/diagnostics/freq_paths_report.py` from the data in `raw/` "
+         "(`experiments/diagnostics/freq_paths_grid.py`; SCC job scripts `scc/freq_paths*.qsub`).\n",
+         "## Columns\n",
+         "Errors in % of |American PDE|, means over the options (an option is left out of a Greek when "
+         "its reference is below 1 % of the largest or its label is exact):\n",
+         "* **Time/label**: mean wall time of one label (s, one core, BU SCC nodes).",
+         "* **Total bias**: |mean of the labels − American PDE|.",
+         "* **Simulation bias**: |mean of the labels − Bermudan PDE at the same dates a year|: the "
+         "Monte Carlo / LSM part (exercise rule fitted on the paths, regression basis, dispersed-start "
+         "regression, pathwise approximation).",
+         "* **Bias from Bermudan approximation**: |Bermudan PDE − American PDE|: exercise allowed on "
+         "the grid dates only; exact (no noise), halves each time the dates double.",
+         "* **Noise floor (false bias)**: √(2/π) × se, se = sd of one label / √(labels): the |bias| an "
+         "unbiased label would show from the noise left in the mean of the labels. A bias close to it "
+         "is not detectable; more labels lower it like 1/√labels.\n",
+         "The total is not the sum of the two parts: they can partly cancel within an option.\n",
+         "## Time per label (s)\n",
+         "| Dates/yr \\ main paths | " + " | ".join(f"{n // 1000}k" for n in G.N_MAIN) + " |",
+         "|---|" + "---|" * len(G.N_MAIN)]
     for spy in G.SPYS:
-        w.append(f"| {spy} | " + " | ".join(
-            f"{t.seconds.get((spy, n), np.nan):.0f} / {t.gb.get((spy, n), np.nan) / 1024:.1f}"
-            for n in G.N_MAIN) + " |")
-    w.append("")
+        w.append(f"| {spy} | " + " | ".join(f"{t.get((spy, n), np.nan):.0f}" for n in G.N_MAIN) + " |")
+    w += ["", "Time grows linearly with main paths x exercise dates, plus a few seconds of fixed cost "
+          "(pilot, regressions). Peak memory is about 3 GB up to 504 dates a year with 300k paths and "
+          "about 10 GB at 504/yr with 600k and at 1008/yr with 300k-600k (T = 2).\n"]
     for q in GREEKS:
-        w.append(f"## {q}\n")
         d = po[po.greek == q]
-        gap = d.groupby("spy").gap.mean()
-        w.append("Exercise-date gap |Bermudan − American| (PDE, mean over options): "
-                 + ", ".join(f"{spy}/yr {gap.get(spy, np.nan):.3g}" for spy in G.SPYS) + "\n")
-        for col, name in [("bias", "Total bias |labels − American| (MAE)"),
-                          ("sim", "Simulation bias |labels − Bermudan| (MAE)"),
-                          ("floor", "Noise floor of the two MAEs above"),
-                          ("noise", "Noise of one label (median sd)")]:
-            w.append(f"**{name}**\n")
-            w += table(po, q, col)
-            w.append("")
+        if d.empty:
+            continue
+        a = d.groupby(["spy", "N_main"])[["total", "sim", "approx", "floor"]].mean()
+        w.append(f"## {NAMES[q]}\n")
+        w.append(f"{d.id.nunique()} options.\n")
+        w.append("| Dates/yr | Main paths | Time/label (s) | Total bias | Simulation bias | "
+                 "Bias from Bermudan approximation | Noise floor (false bias) |")
+        w.append("|---|---|---|---|---|---|---|")
+        for (spy, n), r in a.iterrows():
+            w.append(f"| {spy} | {n // 1000}k | {t.get((spy, n), np.nan):.0f} | {fmt(r.total)} | "
+                     f"{fmt(r.sim)} | {fmt(r.approx)} | {fmt(r.floor)} |")
+        w.append("")
     text = "\n".join(w)
-    path = Path(out) / "freq_paths" / "report.md"
-    path.write_text(text)
-    po.to_csv(Path(out) / "freq_paths" / "per_option.csv", index=False)
+    dest_dir = Path(dest) if dest else Path(out) / "freq_paths"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    (dest_dir / "report.md").write_text(text)
+    po.to_csv(dest_dir / "per_option.csv", index=False)
     return text
 
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--out", default="freq_paths_out")
-    print(report(p.parse_args().out))
+    p.add_argument("--dest", default=None)
+    a = p.parse_args()
+    print(report(a.out, a.dest))

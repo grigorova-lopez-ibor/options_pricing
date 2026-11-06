@@ -168,6 +168,11 @@ def ref(task: int, ntasks: int, out: str):
 
 
 def load(out: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Labels and references: OUT/raw/{labels,reference}.parquet if present (the committed
+    copy in results/diagnostics/bias_vs_dates_paths), else the task chunks in OUT/freq_paths."""
+    raw = Path(out) / "raw"
+    if (raw / "labels.parquet").exists():
+        return pd.read_parquet(raw / "labels.parquet"), pd.read_parquet(raw / "reference.parquet")
     base = Path(out) / "freq_paths"
     lab = [pd.read_parquet(f) for s in ("small", "big") for f in sorted((base / s).glob("task_*/chunk_*.parquet"))]
     refs = [pd.read_parquet(f) for f in sorted((base / "ref").glob("ref_*.parquet"))]
