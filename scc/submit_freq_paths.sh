@@ -15,6 +15,6 @@ case "$PART" in
   *) echo "part must be ref, small or big"; exit 1 ;;
 esac
 PROJ=(); [ -n "${SCC_PROJECT:-}" ] && PROJ=(-P "$SCC_PROJECT")
-qsub "${PROJ[@]}" -N "fp_$PART" -t 1-"$NTASKS" -l h_rt="$HRT" -pe omp "$PE" -l mem_per_core=4G \
+qsub ${PROJ[@]+"${PROJ[@]}"} -N "fp_$PART" -t 1-"$NTASKS" -l h_rt="$HRT" -pe omp "$PE" -l mem_per_core=4G \
      -v CMD="$CMD",SIZE="$SIZE",NTASKS="$NTASKS",OUT="$OUT",VENV="${VENV:-$HOME/venvs/simgreeks}" \
      scc/freq_paths.qsub
