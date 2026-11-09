@@ -1,0 +1,19 @@
+#!/bin/bash -l
+# Best combination (252 dates a year, 600k paths, in-sample) on the 35 check and
+# 40 range options, 100 labels each: experiments/diagnostics/best_config.py.
+# PDE references (American and Bermudan, 75 options). Run from the repository root: qsub scc/best_config_ref.qsub
+# Resumable: resubmit the same command if tasks died.
+#$ -N best_config_ref
+#$ -cwd
+#$ -j y
+#$ -t 1-25
+#$ -pe omp 1
+#$ -l mem_per_core=4G
+#$ -l h_rt=02:00:00
+NTASKS=25; OUT=${OUT:-$HOME/experiments/best_config_out}
+module load python3/3.10.12 2>/dev/null || module load python3
+source "${VENV:-$HOME/venvs/simgreeks}/bin/activate"
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+echo "$(date) $(hostname) task $SGE_TASK_ID"
+python experiments/diagnostics/best_config.py ref --task $((SGE_TASK_ID - 1)) --ntasks "$NTASKS" --out "$OUT"
+echo "$(date) done"

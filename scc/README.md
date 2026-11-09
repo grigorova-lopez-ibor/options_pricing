@@ -157,3 +157,14 @@ About 100 CPU hours. Labels are split by estimated memory: `small` (< 3.3 GB) an
     qsub scc/freq_paths.qsub                     # small labels, 50 tasks
     python experiments/diagnostics/freq_paths_grid.py count --out ~/experiments/freq_paths_out
     python experiments/diagnostics/freq_paths_report.py --out ~/experiments/freq_paths_out
+
+## Best combination on the 35 check and 40 range options
+
+`experiments/diagnostics/best_config.py`: in-sample label, 252 dates a year, 600k main
+paths (pilot 100k), the options of `results/two_per_day`, 100 labels each (7,500
+labels, about 125 CPU hours, about 3 GB a label). From the repository root:
+
+    qsub scc/best_config_ref.qsub                # PDE references, 25 tasks
+    qsub scc/best_config.qsub                    # labels, 100 tasks
+    python experiments/diagnostics/best_config.py count --out ~/experiments/best_config_out
+    python experiments/diagnostics/best_config_report.py --out ~/experiments/best_config_out
