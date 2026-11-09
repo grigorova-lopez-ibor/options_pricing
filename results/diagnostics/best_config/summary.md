@@ -20,7 +20,7 @@ per-option bias: `hist_check.png`, `hist_random.png`.
 | Theta | 0.43 [0.30, 0.58] | 0.34 [0.24, 0.46] | 0.094 [0.058, 0.136] | 0.157 [0.098, 0.222] |
 | Charm | 2.8 [1.9, 3.9] | 4.2 [2.8, 5.7] | 0.92 [0.55, 1.37] | 1.5 [0.7, 2.5] |
 | Vega | 0.24 [0.18, 0.32] | 0.30 [0.23, 0.38] | 0.16 [0.11, 0.22] | 0.27 [0.20, 0.36] |
-| Volga | 18.8 [10.6, 29] | 37 [23, 53] | **24.5** [14.8, 36] | 45 [28, 66] |
+| Volga | 18.8 [10.6, 29] | 37 [23, 53] | 24.5 [14.8, 36] | 45 [28, 66] |
 | Vanna | 5.8 [3.0, 9.0] | 13.7 [5.9, 25.6] | 2.9 [1.8, 4.2] | 3.8 [2.5, 5.3] |
 | Rho | 0.64 [0.39, 0.93] | 0.47 [0.27, 0.72] | 0.38 [0.23, 0.57] | 0.55 [0.38, 0.75] |
 | Phi | 0.58 [0.34, 0.87] | 0.44 [0.26, 0.66] | 0.31 [0.19, 0.46] | 0.46 [0.30, 0.63] |
@@ -33,8 +33,8 @@ Bold: the two 95 % intervals do not overlap.
 
 * 252/yr with 600k paths is as good as or better than 504/yr with 300k for almost
   every Greek at about the same cost: clearly better for Delta and Gamma (check
-  options), Price (range options) and Volga (both sets); lower but within the
-  intervals for Vega, Charm, Vanna and the cross terms; the noise of one label is
+  options) and Price (range options); about half the Volga bias, and lower Vega,
+  Charm, Vanna and cross terms, but within the intervals; the noise of one label is
   lower by about 1/√2.
 * Check options (mostly r = 6 %, strong early exercise): the price bias is now mostly
   the Bermudan approximation (|Bermudan(252) − American| = 0.043 % against an MAE of
