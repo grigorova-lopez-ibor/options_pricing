@@ -11,26 +11,29 @@ volatility, rate, dividend yield and maturity at a fixed S0, then rounded:
            are >= 0.25 %; r0 = 0 is exact)
     T      uniform on [2 months, 2 years], step 0.001
 
-Each label is one call of simgreeks.multi.label with the default MultiConfig
-(one (S, sigma) run of 300,000 main + 100,000 pilot paths; the exercise rule
-fitted on the main paths (in sample; the pilot only chooses the widths); Rho,
-Phi, dDelta/dr, dDelta/dd, Theta and Charm pathwise on its paths); labels scale
-exactly with (S0, K), so S0 only sets the units.
+Each label is one call of simgreeks.multi.label: one (S, sigma) run of
+--main-paths (default 600,000) main and --pilot-paths (default 100,000) pilot
+paths; the paper's selector chooses the widths on the pilot; the exercise rule
+is fitted on the main paths (in sample); Rho, Phi, dDelta/dr, dDelta/dd, Theta
+and Charm pathwise on its paths. Labels scale exactly with (S0, K), so S0 only
+sets the units.
 
-Exercise dates. --steps-per-year (default 504, two a business day): the puts are
-Bermudan with J = round(steps_per_year T) dates. At 504 a year they are within
-0.015 % (median, max 0.07 %) of the American price, 0.03-0.06 % (max 0.4 %) in
-Rho and Phi (results/diagnostics/exercise_frequency); 50 a year is the earlier
-setting. Above 50 dates a year the value-function label is taken at the date
-nearest 1/50 year (MultiConfig.vf_time = 0.02, --vf-time), as validated at daily
-dates (results/american_daily) and at 504 (results/two_per_day). A label at 504
-takes about 50 s at T = 1 on one core, about 60 % of the label with both the
-out-of-sample and in-sample rules (78 s; 35 / 150 s at T = 0.5 / 2 with both),
-and up to 2.8 GB.
+Exercise dates and paths. --steps-per-year (default 252, one a business day):
+the puts are Bermudan with J = round(steps_per_year T) dates. For the same time
+per label, 252 dates with 600k main paths has a lower bias than 504 dates with
+300k for nearly every Greek: more paths shrink the in-sample rule's foresight
+bias, which grows with the number of dates, while the gap to the American value
+at 252 a year is small (price 0.03 %, Rho and Phi about 0.15-0.3 %)
+(results/diagnostics/bias_vs_dates_paths, best_config on main;
+results/diagnostics/insample_studies). Above 50 dates a year the value-function
+label is taken at the date nearest 1/50 year (MultiConfig.vf_time = 0.02,
+--vf-time). A label at 252 a year with 600k paths takes about 60 s on one core
+(T averages 1.1 years in the ranges) and up to 3 GB.
 
     python experiments/generate_labels.py [--n 100] [--S0 100] [--workers N]
                                           [--seed 1] [--sigma-tail concave]
-                                          [--steps-per-year 504] [--vf-time 0.02]
+                                          [--steps-per-year 252] [--vf-time 0.02]
+                                          [--main-paths 600000] [--pilot-paths 100000]
                                           [--exact] [--exact-every 1] [--out PATH]
                                           [--task i --ntasks n | --merge --ntasks n]
 
@@ -160,13 +163,23 @@ def exact(spec: PutSpec) -> dict:
     return {f"exact_{g}": v for g, v in out.items()}
 
 
+def label_config(vf_time, main_paths: int, pilot_paths: int) -> MultiConfig:
+    """The default label with main_paths main and pilot_paths pilot paths in its
+    (S, sigma) run (MultiConfig.run_paths: main = 3 N, pilot = N_pilot)."""
+    main_factor = dict((tuple(g), f) for g, f, _ in MultiConfig().run_paths)[("S", "sigma")]
+    if main_paths % main_factor:
+        raise ValueError(f"--main-paths must be a multiple of {main_factor:g}")
+    return MultiConfig(vf_time=vf_time, N=int(main_paths // main_factor), N_pilot=int(pilot_paths))
+
+
 def one_option(job) -> dict:
     """Label (and reference values) of one option; runs in a worker."""
-    row, base_seed, with_exact, vf_time = job
+    row, base_seed, with_exact, vf_time, main_paths, pilot_paths = job
     spec = spec_of(row)
     out = dict(row)
     t0 = time.time()
-    lab = label(spec, MultiConfig(vf_time=vf_time), job_seed(base_seed, {"id": int(row["id"])}, 0))
+    cfg = label_config(vf_time, main_paths, pilot_paths)
+    lab = label(spec, cfg, job_seed(base_seed, {"id": int(row["id"])}, 0))
     out["seconds"] = round(time.time() - t0, 1)
     out.update({k: lab[k] for k in GREEKS + EXTRA if k != "seconds"})
     if with_exact:
@@ -214,8 +227,10 @@ def main():
     ap.add_argument("--sigma-tail", choices=sorted(TAILS), default="concave",
                     help="shape of the sigma tails (1-5 %% and 50-60 %%; simgreeks.sampling)")
     ap.add_argument("--workers", type=int, default=None)
-    ap.add_argument("--steps-per-year", type=int, default=504,
-                    help="exercise dates a year (504: two a business day; 50: the earlier setting)")
+    ap.add_argument("--steps-per-year", type=int, default=252,
+                    help="exercise dates a year (252: one a business day)")
+    ap.add_argument("--main-paths", type=int, default=600_000, help="main paths per label")
+    ap.add_argument("--pilot-paths", type=int, default=100_000, help="pilot paths per label")
     ap.add_argument("--vf-time", type=float, default=None,
                     help="value-function label date in years (default: 0.02 above 50 dates a "
                          "year, else the first exercise date)")
@@ -243,6 +258,7 @@ def main():
     settings = json.dumps(dict(n=args.n, S0=args.S0, seed=args.seed, exact=args.exact, exercise_rule="insample",
                                ranges=RANGES, sigma=SIGMA_BOUNDS, sigma_tail=args.sigma_tail,
                                steps_per_year=args.steps_per_year, vf_time=vf_time,
+                               main_paths=args.main_paths, pilot_paths=args.pilot_paths,
                                exact_every=args.exact_every, task=args.task, ntasks=args.ntasks),
                           sort_keys=True)
     partial = out.with_name(out.stem + ".partial.csv")
@@ -267,7 +283,7 @@ def main():
 
     workers = args.workers or os.cpu_count()
     print(f"{len(todo)} options to label on {workers} processes, {args.steps_per_year} exercise "
-          f"dates a year{', with reference values' if args.exact else ''}", flush=True)
+          f"dates a year, {args.main_paths:,} main paths{', with reference values' if args.exact else ''}", flush=True)
     t0, n_new, last_pct = time.time(), 0, int(100 * len(done) / max(n_mine, 1))
     with open(partial, "a", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=columns, extrasaction="ignore")
@@ -275,7 +291,8 @@ def main():
             writer.writeheader()
         ex = ProcessPoolExecutor(max_workers=workers)
         futures = [ex.submit(one_option, (r, args.seed,
-                                          args.exact and r["id"] % args.exact_every == 0, vf_time))
+                                          args.exact and r["id"] % args.exact_every == 0, vf_time,
+                                          args.main_paths, args.pilot_paths))
                    for r in todo]
         try:
             for fut in as_completed(futures):
