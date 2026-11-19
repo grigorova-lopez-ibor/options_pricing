@@ -248,6 +248,8 @@ class MultiConfig:
     rd_greeks: str = "pathwise"    # Rho, Phi, dDelta/dr, dDelta/dd: "pathwise" on the runs that do not
     #                                disperse r or d, or "runs" (from runs that do, e.g. GROUPS)
     pathwise_bound: bool = True    # pathwise: exercise only where the payoff >= the European value
+    skip_dead_dates: bool = False  # puts with exercise_bound: skip the exercise regression at dates where
+    #                                no path can pass the bound (same label, less time); experiment
     exercise_bound: bool = True    # the same for the label's own exercise decisions (price, Delta, ...);
     #                                results/diagnostics/exercise_bound: price bias -0.034 % -> 0.002 %
     #                                where r < d, and less noise in every S and sigma Greek
@@ -602,6 +604,25 @@ def kink_index(spec: PutSpec, cfg: MultiConfig, params) -> int | None:
 # --------------------------------------------------------------------------
 # LSM and the t = 0 Taylor regression
 # --------------------------------------------------------------------------
+def dead_date(spec: PutSpec, cfg: MultiConfig, z: dict, Sj, ex, itm, j: int) -> bool:
+    """MultiConfig.skip_dead_dates: True when no in-the-money path at date j can pass
+    the exercise bound ex >= European value. For a put, ex - European falls with S,
+    sigma and d and rises with r, so its largest value over the paths is at
+    (min S, min sigma, max r, min d): one evaluation decides for every path."""
+    if not (cfg.skip_dead_dates and cfg.exercise_bound and spec.kind == "put") or not itm.any():
+        return False
+    i = np.flatnonzero(itm)
+    k = i[np.argmax(ex[i])]
+    tau = spec.T - j * spec.dt
+    eu = european_value(spec, np.array([Sj[k]]), tau, np.array([z["sigma"][i].min()]),
+                        np.array([z["r"][i].max()]), np.array([z["d"][i].min()]))[0]
+    return bool(ex[k] - eu < -1e-12)
+
+
+def dead_date_skipped(cfg: MultiConfig, itm) -> bool:
+    return cfg.skip_dead_dates and not itm.any()
+
+
 def lsm_multi(spec: PutSpec, cfg: MultiConfig, z: dict, W: np.ndarray, scale: dict,
               rules: dict | None = None, value_function: bool = True,
               pathwise: dict | None = None):
@@ -652,7 +673,11 @@ def lsm_multi(spec: PutSpec, cfg: MultiConfig, z: dict, W: np.ndarray, scale: di
         exercise = np.zeros(N, dtype=bool)
         if cfg.style == "bermudan":
             itm = ex > 0.0
-            if rules is not None:
+            if dead_date(spec, cfg, z, Sj, ex, itm, j):
+                itm = np.zeros(N, dtype=bool)          # no path can be exercised here
+            if dead_date_skipped(cfg, itm):
+                fits[j] = None
+            elif rules is not None:
                 fits[j] = rules.get(j)
             elif itm.sum() > 5 * len(index):
                 fits[j] = _fit(Sj[itm], mono[itm], index, cash[itm], cfg.M_tau)
